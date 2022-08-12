@@ -9,12 +9,14 @@ library("ggplot2")
 library('latex2exp')
 library("gridExtra") 
 library("dimRed")
-library("scatterplo3d")
+library("scatterplot3d")
 library("Rtsne")
 library("viridis")
 library("umap")
 
 list.of.packages <- c("rgl","ggplot2","knitr","rglwidget")
+
+len <- length
 #
 #You should be able to simply reuse the following lines of code as is
 #
@@ -64,15 +66,6 @@ colnames(color_scheme) <- c("type", "lick", "nolick", "iti")
 # stim2 <- readMat(stim_trace_path2)
 # stim3 <- readMat(stim_trace_path3)
 
-blv <- readMat(bl_lick_path)
-lick <- readMat(lick_path)
-lick2 <- readMat(lick_path2)
-lick3 <- readMat(lick_path3)
-lick_frames <- c(lick2$licking[1,], (lick3$licking[1,] + ncol(mat2$dff.mat)))
-spike_train <- mat$tmp
-len <- length
-hz <- 31
-dt <- 1/hz
 
 
 euc_dist <- function(a, b) sqrt(sum((a - b)^2))
@@ -140,8 +133,6 @@ time_bin_average <- function(spike_train, window_size) {
 }
 
 
-working_spike_train <- spike_train[which(!1:nrow(spike_train) %in% outliers),]
-
 
 
 plot_3d_pc <- function(df, extra_colors=F, extra_ind=NA, extra_col=NA, plotly=F, lty="p", mcol_pal=NA, ylim=NA, xlim=NA, zlim=NA, xlab=NA, ylab=NA, zlab=NA, screen=NA) {
@@ -160,7 +151,7 @@ plot_3d_pc <- function(df, extra_colors=F, extra_ind=NA, extra_col=NA, plotly=F,
   
   df$group <- 1:nrow(df)
   
-  if (!is.na(mcol_pal)) {
+  if (sum(!is.na(mcol_pal)) > 0) {
     col_pal = mcol_pal
   }
   
@@ -201,7 +192,7 @@ get_stim_indices <- function(stim_mat, allowed_stim=c(1:6), window_size, respons
 }
 
 
-reduce_dim <- function(data, method, ndim=3) {
+reduce_dim <- function(data, method, ndim=3, knn1=0.275, knn2=0.075) {
   print(sprintf("performing dim reduction on method! %s, data dimensonality (%d x %d)", 
          method,
          dim(data)[1],
@@ -221,16 +212,25 @@ reduce_dim <- function(data, method, ndim=3) {
     red_df <- do.call(cbind, lapply(1:ndim, function(i) {red@data@data[,i]}))
     red_df <- as.data.frame(red_df)
   } else if (method == "lem2") {
+
+    print(sprintf("Using KNN1=%d, KNN2=%d",
+          floor(nrow(data) * knn1),
+          floor(nrow(data) * knn2)))
+    
     red <- dimRed::embed(data, 
                  "LaplacianEigenmaps", 
-                 ndim=10)
+                 ndim=15,
+                 knn=floor(nrow(data) * knn1),
+                 t=Inf)
 
-    red <- do.call(cbind, lapply(1:10, function(i) {red@data@data[,i]}))
+    red <- do.call(cbind, lapply(1:15, function(i) {red@data@data[,i]}))
     red <- as.data.frame(red)    
     
     red <- dimRed::embed(red, 
                  "LaplacianEigenmaps", 
-                 ndim=ndim)
+                 ndim=ndim,
+                 knn=floor(nrow(data) * knn2),
+                 t=Inf)
     
     red_df <- do.call(cbind, lapply(1:ndim, function(i) {red@data@data[,i]}))
     red_df <- as.data.frame(red_df)
@@ -242,6 +242,25 @@ reduce_dim <- function(data, method, ndim=3) {
                 n_neighbors=50)
     red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$layout[,i]}))
     red_df <- as.data.frame(red_df)
+  }  else if (method == "umap_denoised") {
+    pc <- prcomp(data)
+    
+    if (ncol(pc$x) < 100) {
+      red <- umap(pc$x, 
+                  n_components=ndim,
+                  metric="cosine",
+                  #min_dist=0.05,
+                  n_neighbors=50)  
+    } else {
+    red <- umap(pc$x[,1:100], 
+                n_components=ndim,
+                metric="cosine",
+                #min_dist=0.05,
+                n_neighbors=50)
+    }
+    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$layout[,i]}))
+    red_df <- as.data.frame(red_df)
+    
   } else if (method == "mds") {
     red <- cmdscale(dist(data),eig=TRUE, k=ndim)
     red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$points[,i]}))
@@ -316,7 +335,7 @@ preprocess_neur_activity <- function(ca_mat, window_size, scale=F) {
     ca_mat <- smooth_ca_trace(ca_mat)
   }
   
-  emat <- create_event_matrix(ca_mat, mad_threshold = 4)n
+  emat <- create_event_matrix(ca_mat, mad_threshold = 4)
   
   emat_clean <- get_final_spike_train(emat, get_outliers(emat))
   ca_mat_clean <- get_final_spike_train(ca_mat, get_outliers(ca_mat))
@@ -711,11 +730,6 @@ mult_mat <- function(mat_list,
                      window_size, 
                      activity_threshold=0.2, 
                      fnames=F,
-                     threeD=F,
-                     use_isomap=F,
-                     use_lem_extra=F,
-                     umap_4=F,
-                     lem_4=F,
                      norm=F) {
   
   if(fnames) {
@@ -750,6 +764,18 @@ mult_mat <- function(mat_list,
     final_mat <- final_mat2
   }
   
+  
+  return(final_mat)
+}
+
+reduce_final_mat <- function(final_mat,
+                             threeD=F,
+                             use_isomap=F,
+                             use_lem_extra=F,
+                             umap_4=F,
+                             lem_4=F,
+                             denoised=F) {
+  
   res <- list(umap_2=NA,
               lem_2=NA,
               lem_ex=NA,
@@ -759,6 +785,13 @@ mult_mat <- function(mat_list,
               iso_3=NA,
               lem_4=NA,
               umap_4=NA)
+  
+  if (denoised) {
+    
+    res$umap_3 <- reduce_dim(t(final_mat), "umap_denoised", 3)
+    res$lem_3 <- reduce_dim(t(final_mat), "lem2", 3)
+    return(res)
+  }
   
   res$umap_2 <- reduce_dim(t(final_mat), "umap", 2)
   res$lem_2 <- reduce_dim(t(final_mat), "lem", 2)
@@ -788,7 +821,7 @@ mult_mat <- function(mat_list,
   if (umap_4) {
     res$umap_4 <- reduce_dim(t(final_mat), "umap", 4)
   }
-    
+  
   return(res)
 }
 
@@ -816,7 +849,8 @@ run_analysis_by_mice_path <- function(path) {
 }
 
 
-run_analysis_by_day_path <- function(base_path, day) {
+run_analysis_by_day_path <- function(path, day) {
+  base_path <- path
   full_path <- sprintf("%s\\day_%s", base_path, day) 
   
   runs <- list.files(full_path, recursive=F)
@@ -854,49 +888,62 @@ run_analysis_by_day_path <- function(base_path, day) {
     names(behavior_mat_list) <- runs
   }
   
-  analyse_matrices_all(matrices_list, behavior_mat_list, full_path)
+  analyse_matrices_all(matrices_list, behavior_mat_list, full_path, shuffled=F)
   #analyse_matrices_combined(matrices_list, behavior_mat_list, full_path)
   #analyse_matrices_solo(matrices_list, NA, full_path)
 }
 
 
-analyse_matrices_all <- function(mat_list, behav_list, output_path, just_pairs=F) {
+analyse_matrices_all <- function(matrices_list, behavior_mat_list, full_path, just_pairs=F, shuffled=F) {
 
+  mat_list <- matrices_list
+  behav_list <- behavior_mat_list
+  output_path <- full_path
+  
   res_path <- sprintf("%s\\%s", output_path, "results")
   dir.create(res_path)
-  run_output_path <- sprintf("%s\\%s", res_path, "all_runs_normed")
+  run_output_path <- sprintf("%s\\%s", res_path, ifelse(shuffled, "all_runs_shuffled","all_runs_cleaned"))
   dir.create(run_output_path)
   
-  res <- mult_mat(mat_list,
-                  window_size=30,
-                  use_lem_extra = F,
-                  use_isomap = F,
-                  threeD = T,
-                  norm=T)
+  # fm <- mult_mat(mat_list,
+  #                 window_size=30,
+  #                 norm=F)
+  # 
+  # 
+  # res <- reduce_final_mat(fm,
+  #                         use_lem_extra = F,
+  #                         use_isomap = F,
+  #                         threeD = T,
+  #                         denoised=T)
   
-  res$umap_3[,4] <- 1:nrow(res$umap_3)
+  #res$umap_3[,4] <- 1:nrow(res$umap_3)
+  # umap_2_time <- res$umap_2
+  # lem_2_time <- res$lem_2
+  # umap_2_time[,3] <- 1:nrow(res$umap_2)
+  # lem_2_time[,3] <- 1:nrow(res$lem_2)
+  
+  res = list()
+  
+  res$lem_3 <- get_reduced_mat_full_day(full_path, override=F, shuffled = shuffled)
   res$lem_3[,4] <- 1:nrow(res$lem_3)
-  umap_2_time <- res$umap_2
-  lem_2_time <- res$lem_2
-  umap_2_time[,3] <- 1:nrow(res$umap_2)
-  lem_2_time[,3] <- 1:nrow(res$lem_2)
+
   
-  if (len(behav_list) == len(mat_list)) {
+  if (!shuffled && len(behav_list) == len(mat_list)) {
   corrected_behav <- get_corrected_behavior_matrices(behav_list[c(1:len(behav_list))],
                                                      ncol(mat_list[[1]]))
   
   color_scheme <- get_color_palettes(corrected_behav,
                                      window_size = 30,
-                                     session_size = nrow(res$umap_2))
+                                     session_size = nrow(res$lem_3))
   
   color_scheme_2 <- get_color_palettes(corrected_behav,
                                        window_size = 30,
-                                       session_size = nrow(res$umap_2),
+                                       session_size = nrow(res$lem_3),
                                        before=3,
                                        after=5)
   
-  color_scheme$time <- viridis(nrow(res$umap_2))
-  color_scheme_2$time <- viridis(nrow(res$umap_2))
+  color_scheme$time <- viridis(nrow(res$lem_3))
+  color_scheme_2$time <- viridis(nrow(res$lem_3))
   
   if ("2" %in% names(color_scheme)){
     names(color_scheme) <- c("Pavlov", "Unknown", "Reward", "Aversive", "Neutral", "Blank", "Response", "Time")
@@ -907,11 +954,11 @@ analyse_matrices_all <- function(mat_list, behav_list, output_path, just_pairs=F
   }
   
   assert(all(unlist(lapply(color_scheme_2, function(it) {len(it)}))))
-  all(len(color_scheme_2$Pavlov) == nrow(res$umap_2))
+  all(len(color_scheme_2$Pavlov) == nrow(res$lem_3))
   
   } else {
-    color_scheme <- list(viridis(nrow(res$umap_2)))
-    color_scheme_2 <- list(viridis(nrow(res$umap_2)))
+    color_scheme <- list(viridis(nrow(res$lem_3)))
+    color_scheme_2 <- list(viridis(nrow(res$lem_3)))
     names(color_scheme) <- c("Time")
     names(color_scheme_2) <- c("Time")
     
@@ -922,34 +969,34 @@ analyse_matrices_all <- function(mat_list, behav_list, output_path, just_pairs=F
     cs <- unlist(color_scheme[cs_name])
     cs2 <- unlist(color_scheme_2[cs_name])
     
-    umap_path <- sprintf("%s\\%s", run_output_path, "umap_2d")
-    dir.create(umap_path)
-    save_3d_reduced_matrix(res$umap_2,
-                           umap_path,
-                           color_scheme = cs,
-                           plot_movie = F,
-                           prefix=sprintf("umap_2d_by_%s_first_last", cs_name))
-    
-    save_3d_reduced_matrix(res$umap_2,
-                           umap_path,
-                           color_scheme = cs2,
-                           plot_movie = F,
-                           prefix=sprintf("umap_2d_by_%s_first_last_trail", cs_name))  
-    
-    
-    lem_path <- sprintf("%s\\%s", run_output_path, "lem_2d")
-    dir.create(lem_path)
-    save_3d_reduced_matrix(res$lem_2,
-                           lem_path,
-                           color_scheme = cs,
-                           plot_movie = F,
-                           prefix=sprintf("lem_2d_by_%s_first_last", cs_name))
-    
-    save_3d_reduced_matrix(res$lem_2,
-                           lem_path,
-                           color_scheme = cs2,
-                           plot_movie = F,
-                           prefix=sprintf("lem_2d_by_%s_first_last_trail", cs_name))                         
+    # umap_path <- sprintf("%s\\%s", run_output_path, "umap_2d")
+    # dir.create(umap_path)
+    # save_3d_reduced_matrix(res$umap_2,
+    #                        umap_path,
+    #                        color_scheme = cs,
+    #                        plot_movie = F,
+    #                        prefix=sprintf("umap_2d_by_%s_first_last", cs_name))
+    # 
+    # save_3d_reduced_matrix(res$umap_2,
+    #                        umap_path,
+    #                        color_scheme = cs2,
+    #                        plot_movie = F,
+    #                        prefix=sprintf("umap_2d_by_%s_first_last_trail", cs_name))  
+    # 
+    # 
+    # lem_path <- sprintf("%s\\%s", run_output_path, "lem_2d")
+    # dir.create(lem_path)
+    # save_3d_reduced_matrix(res$lem_2,
+    #                        lem_path,
+    #                        color_scheme = cs,
+    #                        plot_movie = F,
+    #                        prefix=sprintf("lem_2d_by_%s_first_last", cs_name))
+    # 
+    # save_3d_reduced_matrix(res$lem_2,
+    #                        lem_path,
+    #                        color_scheme = cs2,
+    #                        plot_movie = F,
+    #                        prefix=sprintf("lem_2d_by_%s_first_last_trail", cs_name))                         
 
     
     pairs_path <- sprintf("%s\\%s", run_output_path, "pairs")
@@ -967,52 +1014,38 @@ analyse_matrices_all <- function(mat_list, behav_list, output_path, just_pairs=F
                 cs_name),
         width=2500, height=2500)
     pairs(res$lem_3, col=cs2, pch=19, cex=3.2)
-    dev.off()  
-    
-    png(sprintf("%s\\pairs_umap_3_%s_first_last.png",
-                pairs_path,
-                cs_name),
-        width=2500, height=2500)
-    pairs(res$umap_3, col=cs, pch=19, cex=3.2)
-    dev.off()
-    
-    png(sprintf("%s\\pairs_umap_3_%s_first_last_trail.png",
-                pairs_path,
-                cs_name),
-        width=2500, height=2500)
-    pairs(res$umap_3, col=cs2, pch=19, cex=3.2)
     dev.off() 
     
     
     
-    
-    png(sprintf("%s\\pairs_lem_2_%s_first_last.png",
-                pairs_path,
-                cs_name),
-        width=2500, height=2500)
-    pairs(lem_2_time, col=cs, pch=19, cex=3.2)
-    dev.off()
-    
-    png(sprintf("%s\\pairs_lem_2_%s_first_last_trail.png",
-                pairs_path,
-                cs_name),
-        width=2500, height=2500)
-    pairs(lem_2_time, col=cs2, pch=19, cex=3.2)
-    dev.off()  
-    
-    png(sprintf("%s\\pairs_umap_2_%s_first_last.png",
-                pairs_path,
-                cs_name),
-        width=2500, height=2500)
-    pairs(umap_2_time, col=cs, pch=19, cex=3.2)
-    dev.off()
-    
-    png(sprintf("%s\\pairs_umap_2_%s_first_last_trail.png",
-                pairs_path,
-                cs_name),
-        width=2500, height=2500)
-    pairs(umap_2_time, col=cs2, pch=19, cex=3.2)
-    dev.off() 
+    # 
+    # png(sprintf("%s\\pairs_lem_2_%s_first_last.png",
+    #             pairs_path,
+    #             cs_name),
+    #     width=2500, height=2500)
+    # pairs(lem_2_time, col=cs, pch=19, cex=3.2)
+    # dev.off()
+    # 
+    # png(sprintf("%s\\pairs_lem_2_%s_first_last_trail.png",
+    #             pairs_path,
+    #             cs_name),
+    #     width=2500, height=2500)
+    # pairs(lem_2_time, col=cs2, pch=19, cex=3.2)
+    # dev.off()  
+    # 
+    # png(sprintf("%s\\pairs_umap_2_%s_first_last.png",
+    #             pairs_path,
+    #             cs_name),
+    #     width=2500, height=2500)
+    # pairs(umap_2_time, col=cs, pch=19, cex=3.2)
+    # dev.off()
+    # 
+    # png(sprintf("%s\\pairs_umap_2_%s_first_last_trail.png",
+    #             pairs_path,
+    #             cs_name),
+    #     width=2500, height=2500)
+    # pairs(umap_2_time, col=cs2, pch=19, cex=3.2)
+    # dev.off() 
     
   }
 }
@@ -1503,3 +1536,347 @@ pl <- function(i) {
   
   plot(res$lem_2[,1], res$lem_2[,2], col=mcol, pch=19)
 }
+
+
+
+rate_correlation_mat <- function(matrices_list, behavior_mat_list) {
+  trials_rate_mat <- c()
+  for (i in 1:len(matrices_list)) {
+  
+      mt <- matrices_list[[i]]
+      #mt <- t(apply(mt, 1, scale))
+      bhv <- behavior_mat_list[[i]]
+      
+      for (t in unique(bhv[,7])) {
+        print(sprintf("Computing rate for trial %d, session %d", t,i))
+        ind <- unlist(lapply(bhv[(bhv[,7] == t),1], function(i) {return(c((i - 1 * 31):(i + 6*31)))}))
+        rate <- rowMeans(mt[,ind])
+        trials_rate_mat <- cbind(trials_rate_mat, rate)
+      }
+  }
+}
+
+
+
+run_all <- function(path, indices=NA) {
+  paths <- list.dirs(path, recursive=F)[grep("IC", list.dirs(path, recursive=F))]
+  
+  ind_to_use <- 1:len(paths)
+  if(sum(!is.na(indices) > 0)){
+    ind_to_use <- indices
+    print(sprintf("Using indices: %s", paste(ind_to_use, collapse= " ")))
+  }
+  
+   
+  for(p in paths[ind_to_use]) {
+    mice_num <- str_split(p, "IC")[[1]][[2]]
+    print(sprintf("Running mice %s", mice_num))
+    run_analysis_by_mice_path(sprintf("%s\\IC%s", path, mice_num))
+   
+  }
+}
+
+
+
+
+
+pairs_analysis <- function(path, 
+                           across_mice=F, 
+                           nclusters=20,
+                           scale_cluster_dist_matrix=T,
+                           compare_shuffle=F,
+                           whole_matrix=T) {
+  
+  paths <- list.dirs(path, recursive=F)[grep("IC", list.dirs(path, recursive=F))]
+  path_pairs <- list()
+
+  # Get all pairs of possible paths
+  for (p in paths) {
+    mice_num <- str_split(p, "IC")[[1]][[2]]
+    runs <- list.dirs(p, recursive = F)
+    days <- sapply(str_split(runs, "day_"), function(l) {return(l[[2]])})
+    
+    pairs_mat <- apply(combn(days,2), 2, 
+                       function(p) {
+                         return(sprintf("%s\\IC%s\\day_%s", path, mice_num, p))
+                       })
+    
+    path_pairs <-
+      append(path_pairs,
+             lapply(seq_len(ncol(pairs_mat)), function(i) pairs_mat[,i]))
+  }
+  
+  
+  # Pairs across mice, and remove pairs from within mice  
+  if (across_mice) {
+    all_days <- c()
+    
+    for (p in paths) {
+      mice_num <- str_split(p, "IC")[[1]][[2]]
+      runs <- list.dirs(p, recursive = F)
+      days <- sapply(str_split(runs, "day_"), function(l) {return(l[[2]])})
+      all_days <- c(all_days, sprintf("%s\\IC%s\\day_%s", path, mice_num, days))
+    }
+  
+    # All possible combinations of all days
+    pairs_mat <- combn(all_days,2)
+    across <- lapply(seq_len(ncol(pairs_mat)), function(i) pairs_mat[,i])
+    
+    # Remove days which are within mice
+    path_pairs <- across[which(!across %in% path_pairs)]
+  }
+  
+  
+  
+  structure_correlations <- c()
+  
+  for (pair in path_pairs) {
+    day1 <- pair[1]
+    day2 <- pair[2]
+    
+    s1 <- F
+    s2 <- F
+    
+    if (compare_shuffle) {
+      # Randomly select a shuffle comparsion
+      s1 <- sample(c(T,F),1)
+      s2 <- !s1
+      print(s1)
+      print(s2)
+    }
+
+    day1_mat <- get_reduced_mat_full_day(day1, shuffled=s1)
+    day2_mat <- get_reduced_mat_full_day(day2, shuffled=s2)
+    
+    if (scale_cluster_dist_matrix) {
+      km_day1 <- kmeans(apply(day1_mat, 2, scale), nclusters, iter.max=300)
+      km_day2 <- kmeans(apply(day2_mat, 2, scale), nclusters, iter.max=300)
+    } else {
+      km_day1 <- kmeans(day1_mat, nclusters, iter.max=300)
+      km_day2 <- kmeans(day2_mat, nclusters, iter.max=300)
+    }
+    
+    dist_matrix_day1 <- as.matrix(dist(km_day1$centers))
+    dist_matrix_day2 <- as.matrix(dist(km_day2$centers))
+    
+    h1 <- heatmap(dist_matrix_day1, plot=F)
+    h2 <- heatmap(dist_matrix_day2, plot=F)
+    
+    if (whole_matrix) {
+      central_tendency_cor <- (cor(c(dist_matrix_day1[h1$rowInd, h1$colInd]), 
+                                         c(dist_matrix_day2[h2$rowInd, h2$colInd])))
+    
+    } else {
+      central_tendency_cor <- median(cor(dist_matrix_day1[h1$rowInd, h1$colInd], 
+                                         dist_matrix_day2[h2$rowInd, h2$colInd]))      
+    }
+    
+    print(sprintf("Got mean cor(%f) between %s to %s", 
+                  central_tendency_cor, 
+                  str_split(day1, "data\\\\")[[1]][2], 
+                  str_split(day2, "data\\\\")[[1]][2]))
+    
+    structure_correlations <- c(structure_correlations, central_tendency_cor)
+  }
+  
+  return(structure_correlations)
+}
+
+
+ get_reduced_mat_full_day <- function(day_path, 
+                                     type="lem2", 
+                                     ndim=3, 
+                                     window_size=30,
+                                     normed=T,
+                                     shuffled=F,
+                                     time_shuffled=T,
+                                     matrix_subpath="reduced_matrices_full_day",
+                                     override=F,
+                                     knn1=0.275,
+                                     knn2=0.075) {
+  
+  knn1 <- round(knn1, digits=3)
+  knn2 <- round(knn2, digits=3)
+  
+  reduced_mat_name <- sprintf("t%s_d%d_w%d_knnf%.3f_knns%.3f_zs%s%s",
+                              type,
+                              ndim,
+                              window_size,
+                              knn1,
+                              knn2,
+                              ifelse(normed, "1", "0"),
+                              ifelse(shuffled, ifelse(time_shuffled, "_time_shuffled", "_cell_shuffled"), ""))
+  
+  # Firstly check whether there exists a matrice for that day
+  if (!override && matrix_subpath %in% list.dirs(day_path, recursive = F, full.names = F)) {
+    
+    if (sprintf("%s.R", reduced_mat_name) %in% 
+        list.files(sprintf("%s\\%s\\", day_path, matrix_subpath), full.names = F)) {
+      
+      print(sprintf("Found reduced matrix %s, loading", reduced_mat_name))
+      load(sprintf("%s\\%s\\%s.R", day_path, matrix_subpath, reduced_mat_name))
+      return(reduced)
+    }
+  }
+  
+  
+  print(sprintf("Reduced matrix %s does not exist! creating!", reduced_mat_name))
+  
+  runs <- list.files(day_path, recursive=F)
+  runs <- runs[which(grepl("\\.R", runs))]
+  runs <- sapply(str_split(runs, ".R"), function(l){return(l[[1]])})
+  
+  # Load all matrices for all runs
+  matrices_list <- lapply(runs, 
+                          function(r) {load(sprintf("%s\\%s.R", day_path, r)); 
+                            return(fmat)})
+  
+  
+  final_mat <- mult_mat(matrices_list, window_size=window_size, norm=normed)
+  
+  if (shuffled) {
+    if (time_shuffled) {
+      print("Time shuffling!")
+      final_mat <- generate_shuffled_matrices(final_mat, time_shuffled=T)
+    } else {
+      
+      print("Cell shuffling!")
+      final_mat <- generate_shuffled_matrices(final_mat, time_shuffled=F)
+    }
+  }
+  
+  reduced <- reduce_dim(t(final_mat), type, ndim, knn1=knn1,knn2=knn2)
+  
+  
+  dir.create(sprintf("%s\\%s", day_path, matrix_subpath))
+  save(reduced, file=sprintf("%s\\%s\\%s.R", day_path, matrix_subpath, reduced_mat_name))
+  print(sprintf("Saving mat! %s", reduced_mat_name))
+  return(reduced)
+}
+
+generate_shuffled_matrices <- function(final_mat, time_shuffled=T) {
+  
+  if (time_shuffled) {
+    shuffled_mat <- t(apply(final_mat, 1, function(row) {return(row[sample(1:len(row), len(row))])}))
+    return(shuffled_mat)
+  }
+  
+  
+  shuffled_mat_cells <-  apply(final_mat, 2, function(col) {return(col[sample(1:len(col), len(col))])})
+  return(shuffled_mat_cells)
+}
+
+
+analyse_structure <- function(day_path, nclusters=NA, centroid_threshold=NA, shuffle=F, hdbscan_pts=NA, dbscan_eps = NA, dbscan_minpts=NA) {
+  mat <- get_reduced_mat_full_day(day_path, shuffled = shuffle)
+  eucl_dist <- function(x1, x2){
+    return(sqrt(sum((x1 - x2)^2)))
+  }
+  
+  cp = viridis(nrow(mat))
+  
+  if(!is.na(nclusters)) {
+    km <- kmeans(mat, nclusters, iter.max=300)
+    cp = viridis(nclusters)[km$cluster]
+    barplot(table(km$cluster))
+    
+    
+    if (!is.na(centroid_threshold)) {
+      
+      keep <- c()
+      for (cluster_id in unique(km$cluster)) {
+        centroid <- km$centers[cluster_id,]
+        temp_mat <- mat[which(km$cluster == cluster_id),]
+        distances <- apply(temp_mat, 1, function(pt) {eucl_dist(pt, centroid)})
+        scaled_distances <- distances / sd(distances)
+
+        
+        cluster_keep <- which(abs(scaled_distances) < centroid_threshold)
+        print(sprintf("Removing %d points from cluster %d", 
+                      nrow(temp_mat) - len(cluster_keep),
+                      cluster_id))
+        
+        keep <- c(keep, rownames(temp_mat[cluster_keep,]))
+      }
+      
+      print(sprintf("Totally removed %d points", nrow(mat) - len(keep)))
+      
+      mat <- mat[keep,]
+      cp <- cp[keep]
+    }
+  } else if (!is.na(hdbscan_pts)) {
+    hc <- hdbscan(mat, hdbscan_pts)
+    
+    mat <- mat[which(hc$cluster != 0),]
+    
+    print(sprintf("Using hdbscan! Removing %d", sum(hc$cluster ==0)))
+    cp <- viridis(max(hc$cluster))[hc$cluster[which(hc$cluster != 0)]]
+  } else if (!is.na(dbscan_eps) && !is.na(dbscan_minpts)) {
+    hc <- dbscan(mat, dbscan_eps, dbscan_minpts)
+    
+    mat <- mat[which(hc$cluster != 0),]
+    
+    print(sprintf("Using hdbscan! Removing %d", sum(hc$cluster ==0)))
+    cp <- viridis(max(hc$cluster))[hc$cluster[which(hc$cluster != 0)]]
+  }
+  
+  
+  plot_3d_pc(mat, mcol_pal=cp) 
+  
+}
+
+
+tune_knn_parameters_lem <- function(path) {
+  
+  paths <- list.dirs(path, recursive=F)[grep("IC", list.dirs(path, recursive=F))]
+  path_pairs <- list()
+  
+  # Get all pairs of possible paths
+  for (p in paths) {
+    mice_num <- str_split(p, "IC")[[1]][[2]]
+    runs <- list.dirs(p, recursive = F)
+    days <- sapply(str_split(runs, "day_"), function(l) {return(l[[2]])})
+    
+    pairs_mat <- apply(combn(days,2), 2, 
+                       function(p) {
+                         return(sprintf("%s\\IC%s\\day_%s", path, mice_num, p))
+                       })
+    
+    path_pairs <-
+      append(path_pairs,
+             lapply(seq_len(ncol(pairs_mat)), function(i) pairs_mat[,i]))
+  }
+  
+  paths_all <- unique(unlist(path_pairs))
+  
+  
+  knn1_range <- seq(0.275,0.525, by=0.05)
+  knn2_range <- seq(0.05, 0.075, by=0.025)
+  print(knn1_range)
+  print(knn2_range)
+  
+  
+  for (knn1 in knn1_range) {
+    for (knn2 in knn2_range)
+      for (path_to_tune in paths_all) {
+        
+        print(sprintf("Generating lem2 reduction knn1(%f) knn2(%f) for path (%s)",
+                      knn1,
+                      knn2,
+                      path_to_tune))
+        
+        get_reduced_mat_full_day(path_to_tune,
+                                 knn1 = knn1,
+                                 knn2 = knn2,
+                                 override = F)
+        
+        get_reduced_mat_full_day(path_to_tune,
+                                 knn1 = knn1,
+                                 knn2 = knn2,
+                                 override = F,
+                                 shuffled = T)              
+    }
+  }
+}
+
+
