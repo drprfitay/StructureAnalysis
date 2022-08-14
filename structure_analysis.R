@@ -759,8 +759,9 @@ mult_mat <- function(mat_list,
   if (norm) {
     print("Z-scoring!!!")
     final_mat2  <- smooth_ca_trace(final_mat)
-    print(final_mat2[1:10,1])
-    print(final_mat[1:10,1])
+    
+     print(final_mat2[1:10,1])
+     print(final_mat[1:10,1])
     final_mat <- final_mat2
   }
   
@@ -1693,7 +1694,8 @@ pairs_analysis <- function(path,
                                      matrix_subpath="reduced_matrices_full_day",
                                      override=F,
                                      knn1=0.275,
-                                     knn2=0.075) {
+                                     knn2=0.075, 
+                                     just_original_mat=F) {
   
   knn1 <- round(knn1, digits=3)
   knn2 <- round(knn2, digits=3)
@@ -1708,7 +1710,7 @@ pairs_analysis <- function(path,
                               ifelse(shuffled, ifelse(time_shuffled, "_time_shuffled", "_cell_shuffled"), ""))
   
   # Firstly check whether there exists a matrice for that day
-  if (!override && matrix_subpath %in% list.dirs(day_path, recursive = F, full.names = F)) {
+  if (!just_original_mat && !override && matrix_subpath %in% list.dirs(day_path, recursive = F, full.names = F)) {
     
     if (sprintf("%s.R", reduced_mat_name) %in% 
         list.files(sprintf("%s\\%s\\", day_path, matrix_subpath), full.names = F)) {
@@ -1721,7 +1723,6 @@ pairs_analysis <- function(path,
   
   
   print(sprintf("Reduced matrix %s does not exist! creating!", reduced_mat_name))
-  
   runs <- list.files(day_path, recursive=F)
   runs <- runs[which(grepl("\\.R", runs))]
   runs <- sapply(str_split(runs, ".R"), function(l){return(l[[1]])})
@@ -1733,6 +1734,11 @@ pairs_analysis <- function(path,
   
   
   final_mat <- mult_mat(matrices_list, window_size=window_size, norm=normed)
+  
+  if (just_original_mat) {
+    print("Returning original matrix")
+    return(final_mat)
+  }
   
   if (shuffled) {
     if (time_shuffled) {
