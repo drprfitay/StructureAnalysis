@@ -11,18 +11,53 @@ skippy_preset <- list(type="lem",
                       preset=list(name="Skippy", 
                                   type = "lem", 
                                   ndim = 20, 
-                                  knn1=0.25, 
+                                  knn1=0.2, 
                                   knn2=0,
                                   window_size = 15))
 
+taaman_preset <- list(type="lem",
+                      knn1=0.2,
+                      knn2=0,
+                      ndim=6,
+                      preset=list(name="Taaman", 
+                                  type = "lem", 
+                                  ndim = 20, 
+                                  knn1=0.2, 
+                                  knn2=0,
+                                  window_size = 15))
+
+nitzat_preset <- list(type="lem",
+                      knn1=0.2,
+                      knn2=0,
+                      ndim=6,
+                      preset=list(name="Nitzat", 
+                                  type = "lem", 
+                                  ndim = 20, 
+                                  knn1=0.2, 
+                                  knn2=0,
+                                  window_size = 15))
+
+
+
+dal_natran_preset <- list(type="lem",
+                          knn1=0.075,
+                          knn2=0,
+                          ndim=6,
+                          preset=list(name="DalNatran", 
+                                      type = "lem", 
+                                      ndim = 20, 
+                                      knn1=0.075, 
+                                      knn2=0,
+                                      window_size = 15))
+
 jiffie_preset <- list(type="lem",
-                      knn1=0.15,
+                      knn1=0.075,
                       knn2=0,
                       ndim=8,
                       preset=list(name="Jiffie", 
                                   type = "lem", 
                                   ndim = 20, 
-                                  knn1=0.25, 
+                                  knn1=0.2, 
                                   knn2=0,
                                   window_size = 15))
 
@@ -33,7 +68,7 @@ bnd_preset <- list(type="lem",
                    preset=list(name="BnD", 
                                type = "lem", 
                                ndim = 20, 
-                               knn1=0.25, 
+                               knn1=0.1, 
                                knn2=0,
                                window_size = 15))
 
@@ -45,7 +80,7 @@ shufersal_preset <- list(type="lem",
                          preset=list(name="Shufersal", 
                                      type = "lem", 
                                      ndim = 20, 
-                                     knn1=0.25, 
+                                     knn1=0.1, 
                                      knn2=0,
                                      window_size = 15))
         
@@ -98,6 +133,12 @@ preset_list=list("hashahar"=hashahar_preset,
                  "skippy"=skippy_preset,
                  "hummus"=hummus_preset,
                  "humus"=hummus_preset,
+                 "taaman"=taaman_preset,
+                 "taman"=taaman_preset,
+                 "nitzat"=nitzat_preset,
+                 "nitsat"=nitzat_preset,
+                 "dalNatran"=dal_natran_preset,
+                 "dal"=dal_natran_preset,
                  "original"==hummus_preset)
 
 get_preset_of_choice <- function(preset_name) {
