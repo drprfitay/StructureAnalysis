@@ -5,7 +5,7 @@ hummus_preset <- list(just_original_mat=T,
                       preset=list())
 
 skippy_preset <- list(type="lem",
-                      knn1=0.1,
+                      knn1=0.075,
                       knn2=0,
                       ndim=6,
                       preset=list(name="Skippy", 
@@ -16,7 +16,7 @@ skippy_preset <- list(type="lem",
                                   window_size = 15))
 
 jiffie_preset <- list(type="lem",
-                      knn1=0.1,
+                      knn1=0.15,
                       knn2=0,
                       ndim=8,
                       preset=list(name="Jiffie", 
@@ -27,7 +27,7 @@ jiffie_preset <- list(type="lem",
                                   window_size = 15))
 
 bnd_preset <- list(type="lem",
-                   knn1=0.075,
+                   knn1=0.1,
                    knn2=0,
                    ndim=8,
                    preset=list(name="BnD", 
@@ -39,7 +39,7 @@ bnd_preset <- list(type="lem",
 
 
 shufersal_preset <- list(type="lem",
-                         knn1=0.075,
+                         knn1=0.1,
                          knn2=0,
                          ndim=6,
                          preset=list(name="Shufersal", 

@@ -1,4 +1,5 @@
 
+library(intRinsic)
 insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC19\\day_150911\\",
                          "Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
                          "Y:\\livneh\\itayta\\data\\IC13\\day_150406\\",
@@ -61,7 +62,7 @@ id_analysis <- function(path) {
     idims <- c()
     for (preset in c("hummus", "skippy", "jiffie", "nutella", "hashahar")) {
       
-      fmat <- get_mat_with_preset(work_path, preset, oldscope = control, activity_threshold=activity_thres)
+      fmat <- get_mat_with_preset(work_path, preset, oldscope = control, activity_threshold=activity_thres, override=T)
       
       trim_005 <-  twonn(fmat, method = "linfit", c_trimmed = 0.05)$est[2]
       trim_001 <-  twonn(fmat, method = "linfit", c_trimmed = 0.01)$est[2]

@@ -65,7 +65,8 @@ reduce_dim <- function(data, method, ndim=3, knn1=0.275, knn2=0.075) {
     red_df <- as.data.frame(red_df)
     
   } else if (method == "lem") {
-    red <- dimRed::embed(data, "LaplacianEigenmaps", ndim=ndim)
+    print(sprintf("Using KNN%f (%d)", knn1, nn1))
+    red <- dimRed::embed(data, "LaplacianEigenmaps", ndim=ndim, knn=nn1)
     red_df <- do.call(cbind, lapply(1:ndim, function(i) {red@data@data[,i]}))
     red_df <- as.data.frame(red_df)
   } else if (method == "isomap") {
@@ -495,16 +496,21 @@ get_reduced_mat_full_day <- function(day_path,
 }
 
 
-get_mat_with_preset <- function(path, preset_name, activity_threshold=0.2, oldscope=F) {
+get_mat_with_preset <- function(path, preset_name, activity_threshold=0.2, oldscope=F, override=F, inner_override=F) {
   preset <- get_preset_of_choice(preset_name)
   preset$activity_threshold <- activity_threshold
   
   if (len(preset$preset) > 0) {
     preset$preset$activity_threshold <- activity_threshold
+    
+    if (inner_override) {
+      preset$preset$override <- inner_override
+    }
   }
   
   preset$day_path <- path
   preset$control <-  oldscope
+  preset$override <- override
   
   mat <- do.call(get_reduced_mat_full_day, preset)
   
