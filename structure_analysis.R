@@ -13,6 +13,7 @@ library("scatterplot3d")
 library("Rtsne")
 library("viridis")
 library("umap")
+library("lsa")
 
 list.of.packages <- c("rgl","ggplot2","knitr","rglwidget")
 
@@ -28,7 +29,7 @@ if(length(new.packages)) install.packages(new.packages)
 #
 lapply(list.of.packages,function(x){library(x,character.only=TRUE)})
 
-
+cos_dist <- function(x,y) {c(cosine(x, y))}
 matrices_path <- "C:\\Users\\97254\\Documents\\yoav_livneh_lab\\temp\\"
 sample_path <- "C:\\Users\\97254\\Documents\\yoav_livneh_lab\\sample_data\\IC44_170518_run1\\dFF_mat2.mat"
 sample_path2 <- "C:\\Users\\97254\\Documents\\yoav_livneh_lab\\sample_data\\IC44_170518_run2\\dFF_mat2.mat"
@@ -68,14 +69,10 @@ colnames(color_scheme) <- c("type", "lick", "nolick", "iti")
 
 
 
-euc_dist <- function(a, b) sqrt(sum((a - b)^2))
 
 mat_stability <- function(mt)
 {return(c(0,sapply(2:ncol(mt), function(i) {euc_dist(mt[,i], mt[,i-1])})))}
 
-get_binned_index <- function(i, window_size) {
-  rst <- floor((i)/window_size) + ifelse(i %% window_size == 0, 0,1)
-}
 
 
 # Return cells in which activity in above 3sigma 
@@ -101,46 +98,16 @@ get_outliers <- function(spike_train, plot=F, threshold=3) {
   return(outliers)
 }
 
-get_final_spike_train <- function(spike_train, outliers) {
-  return(spike_train[!1:nrow(spike_train) %in% outliers,])
-}
-
-time_bin_average_vec <- function(vec, window_size) {
-
-  indices <- 1:(len(vec) / window_size)
-  
-  final_vec <- c()
-  for (ind in indices) {
-    subset_ind <- ((ind - 1 ) * window_size + 1):(ind * window_size)
-    final_vec <-  c(final_vec,
-                       mean(vec[subset_ind]))
-  }
-  
-  return(final_vec)
-}
-
-time_bin_average <- function(spike_train, window_size) {
-  indices <- 1:(ncol(spike_train) / window_size)
-  
-  final_spike_train <- c()
-  for (ind in indices) {
-    subset_ind <- ((ind - 1 ) * window_size + 1):(ind * window_size)
-    final_spike_train <- cbind(final_spike_train,
-                               rowMeans(spike_train[,subset_ind]))
-  }
-  
-  return(final_spike_train)
-}
 
 
 
-
-plot_3d_pc <- function(df, extra_colors=F, extra_ind=NA, extra_col=NA, plotly=F, lty="p", mcol_pal=NA, ylim=NA, xlim=NA, zlim=NA, xlab=NA, ylab=NA, zlab=NA, screen=NA) {
+plot_3d_pc <- function(df, extra_colors=F, extra_ind=NA, extra_col=NA, plotly=T, lty="p", mcol_pal=NA, ylim=NA, xlim=NA, zlim=NA, xlab=NA, ylab=NA, zlab=NA, screen=NA) {
   library(plotly)
   
   #col_pal <- plasma(nrow(df))
   col_pal <- c(viridis(nrow(df)))
   #col_pal <- c(col_pal, inferno(nrow(df) / 2))
+  colnames(df) <- c("x", "y", "z")
 
   
   if (extra_colors && len(extra_col) == len(extra_ind)) {
@@ -161,7 +128,7 @@ plot_3d_pc <- function(df, extra_colors=F, extra_ind=NA, extra_col=NA, plotly=F,
                      z = ~z, 
                      color = ~group,
                      colors = col_pal)
-  fig <- fig %>% add_trace(mode="line+markers", marker=list(size=1.5))
+  fig <- fig %>% add_trace(mode="line+markers", marker=list(size=3.5))
   fig <- fig %>% layout(scene = list(xaxis = list(title = 'Dim 1'),
                                      yaxis = list(title = 'Dim 2'),
                                      zaxis = list(title = 'Dim 3')))
@@ -171,7 +138,7 @@ plot_3d_pc <- function(df, extra_colors=F, extra_ind=NA, extra_col=NA, plotly=F,
   } else {
     col_pal[1] <- "gray50"
     plot3d(df$x, df$y, df$z,col=col_pal, 
-           pch=19, size=5, type=lty, screen=list(x=60, y=-30, z=-100),
+           pch=19, size=, type=lty, screen=list(x=60, y=-30, z=-100),
            xlim=xlim, ylim=ylim, zlim=zlim,
            xlab=xlab,zlab=zlab,ylab=ylab)
   }
@@ -190,90 +157,6 @@ get_stim_indices <- function(stim_mat, allowed_stim=c(1:6), window_size, respons
   
   return(list(ind=fixed_indices, type=stim_types))
 }
-
-
-reduce_dim <- function(data, method, ndim=3, knn1=0.275, knn2=0.075) {
-  print(sprintf("performing dim reduction on method! %s, data dimensonality (%d x %d)", 
-         method,
-         dim(data)[1],
-         dim(data)[2]
-         ))
-  if (method == "tsne") {
-    red <- Rtsne(data, dims = ndim, perplexity=100, check_duplicates = F)
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$Y[,i]}))
-    red_df <- as.data.frame(red_df)
-    
-  } else if (method == "lem") {
-    red <- dimRed::embed(data, "LaplacianEigenmaps", ndim=ndim)
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red@data@data[,i]}))
-    red_df <- as.data.frame(red_df)
-  } else if (method == "isomap") {
-    red <- dimRed::embed(data, "Isomap", ndim=ndim)
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red@data@data[,i]}))
-    red_df <- as.data.frame(red_df)
-  } else if (method == "lem2") {
-
-    print(sprintf("Using KNN1=%d, KNN2=%d",
-          floor(nrow(data) * knn1),
-          floor(nrow(data) * knn2)))
-    
-    red <- dimRed::embed(data, 
-                 "LaplacianEigenmaps", 
-                 ndim=15,
-                 knn=floor(nrow(data) * knn1),
-                 t=Inf)
-
-    red <- do.call(cbind, lapply(1:15, function(i) {red@data@data[,i]}))
-    red <- as.data.frame(red)    
-    
-    red <- dimRed::embed(red, 
-                 "LaplacianEigenmaps", 
-                 ndim=ndim,
-                 knn=floor(nrow(data) * knn2),
-                 t=Inf)
-    
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red@data@data[,i]}))
-    red_df <- as.data.frame(red_df)
-  } else if (method == "umap") {
-    red <- umap(data, 
-                n_components=ndim,
-                metric="cosine",
-                #min_dist=0.05,
-                n_neighbors=50)
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$layout[,i]}))
-    red_df <- as.data.frame(red_df)
-  }  else if (method == "umap_denoised") {
-    pc <- prcomp(data)
-    
-    if (ncol(pc$x) < 100) {
-      red <- umap(pc$x, 
-                  n_components=ndim,
-                  metric="cosine",
-                  #min_dist=0.05,
-                  n_neighbors=50)  
-    } else {
-    red <- umap(pc$x[,1:100], 
-                n_components=ndim,
-                metric="cosine",
-                #min_dist=0.05,
-                n_neighbors=50)
-    }
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$layout[,i]}))
-    red_df <- as.data.frame(red_df)
-    
-  } else if (method == "mds") {
-    red <- cmdscale(dist(data),eig=TRUE, k=ndim)
-    red_df <- do.call(cbind, lapply(1:ndim, function(i) {red$points[,i]}))
-    red_df <- as.data.frame(red_df)
-    
-  } else {
-   return(data) 
-  }
-  
-  colnames(red_df) <- c("x","y","z")[1:ndim]
-  return(red_df)
-}
-
 
 split <- function(binned_st, factor, alg) {
   
@@ -726,48 +609,6 @@ pv_correlation <- function(mat,
 
 
 
-mult_mat <- function(mat_list, 
-                     window_size, 
-                     activity_threshold=0.2, 
-                     fnames=F,
-                     norm=F) {
-  
-  if(fnames) {
-   mat_list <- lapply(mat_list, function(f) {load(f);return(fmat)}) 
-  }
-  
-  avgd_mat_list <- lapply(mat_list, function(mat) {time_bin_average(mat, window_size)})
-  
-  mean_avgd <- lapply(mat_list, function(mat) {rowMeans(mat)})
-  
-  outliers  <- lapply(mean_avgd, function(avg) {which(abs(avg) > activity_threshold)})
-  outliers <- unique(unlist(outliers))
-  
-  to_keep <- 1:nrow(avgd_mat_list[[1]])
-  to_keep <- to_keep[which(!to_keep %in% outliers)]
-  
-  final_mat <- do.call(cbind,
-                       lapply(avgd_mat_list, 
-                              function(mat) {return(mat[to_keep,])}))
-  
-  
-  outliers <- which(apply(final_mat, 1, function(r) {sum(is.nan(r)) > 0}))
-  to_keep <- 1:nrow(final_mat)
-  to_keep <- to_keep[which(!to_keep %in% outliers)]
-  final_mat <- final_mat[to_keep,]
-  
-  if (norm) {
-    print("Z-scoring!!!")
-    final_mat2  <- smooth_ca_trace(final_mat)
-    
-     print(final_mat2[1:10,1])
-     print(final_mat[1:10,1])
-    final_mat <- final_mat2
-  }
-  
-  
-  return(final_mat)
-}
 
 reduce_final_mat <- function(final_mat,
                              threeD=F,
@@ -849,6 +690,17 @@ run_analysis_by_mice_path <- function(path) {
   }
 }
 
+get_behav_mat <- function(full_path) {
+  behavior_mat_list <- lapply(list.files(sprintf("%s\\behavior\\",full_path)),
+                              function(tv_mat)
+                              {
+                                return(readMat(sprintf("%s\\behavior\\%s",
+                                                       full_path,
+                                                       tv_mat))$Stim.Master)
+                              })
+  
+  return(behavior_mat_list)
+}
 
 run_analysis_by_day_path <- function(path, day) {
   base_path <- path
@@ -874,15 +726,17 @@ run_analysis_by_day_path <- function(path, day) {
   # }
   
   
+  # 
+  # behavior_mat_list <- lapply(list.files(sprintf("%s\\behavior\\",full_path)),
+  #                             function(tv_mat)
+  #                               {
+  #                                 return(readMat(sprintf("%s\\behavior\\%s",
+  #                                                        full_path,
+  #                                                        tv_mat))$Stim.Master)
+  #                               })
+  # 
   
-  behavior_mat_list <- lapply(list.files(sprintf("%s\\behavior\\",full_path)),
-                              function(tv_mat)
-                                {
-                                  return(readMat(sprintf("%s\\behavior\\%s",
-                                                         full_path,
-                                                         tv_mat))$Stim.Master)
-                                })
-  
+  behavior_mat_list <- get_behav_mat(full_path)
   names(matrices_list) <- runs
 
   if (len(behavior_mat_list) == len(matrices_list)) {
@@ -1453,6 +1307,12 @@ save_3d_reduced_matrix <- function(df,
 } 
 
 
+behavior_mat_fixed <- function(full_path, session_size) {
+ 
+  return(do.call(rbind, get_corrected_behavior_matrices(get_behav_mat(full_path), session_size))) 
+}
+
+
 get_corrected_behavior_matrices <- function(behav_mat_list, session_size) {
   
   fm <- behav_mat_list
@@ -1684,82 +1544,6 @@ pairs_analysis <- function(path,
 }
 
 
- get_reduced_mat_full_day <- function(day_path, 
-                                     type="lem2", 
-                                     ndim=3, 
-                                     window_size=30,
-                                     normed=T,
-                                     shuffled=F,
-                                     time_shuffled=T,
-                                     matrix_subpath="reduced_matrices_full_day",
-                                     override=F,
-                                     knn1=0.275,
-                                     knn2=0.075, 
-                                     just_original_mat=F) {
-  
-  knn1 <- round(knn1, digits=3)
-  knn2 <- round(knn2, digits=3)
-  
-  reduced_mat_name <- sprintf("t%s_d%d_w%d_knnf%.3f_knns%.3f_zs%s%s",
-                              type,
-                              ndim,
-                              window_size,
-                              knn1,
-                              knn2,
-                              ifelse(normed, "1", "0"),
-                              ifelse(shuffled, ifelse(time_shuffled, "_time_shuffled", "_cell_shuffled"), ""))
-  
-  # Firstly check whether there exists a matrice for that day
-  if (!just_original_mat && !override && matrix_subpath %in% list.dirs(day_path, recursive = F, full.names = F)) {
-    
-    if (sprintf("%s.R", reduced_mat_name) %in% 
-        list.files(sprintf("%s\\%s\\", day_path, matrix_subpath), full.names = F)) {
-      
-      print(sprintf("Found reduced matrix %s, loading", reduced_mat_name))
-      load(sprintf("%s\\%s\\%s.R", day_path, matrix_subpath, reduced_mat_name))
-      return(reduced)
-    }
-  }
-  
-  
-  print(sprintf("Reduced matrix %s does not exist! creating!", reduced_mat_name))
-  runs <- list.files(day_path, recursive=F)
-  runs <- runs[which(grepl("\\.R", runs))]
-  runs <- sapply(str_split(runs, ".R"), function(l){return(l[[1]])})
-  
-  # Load all matrices for all runs
-  matrices_list <- lapply(runs, 
-                          function(r) {load(sprintf("%s\\%s.R", day_path, r)); 
-                            return(fmat)})
-  
-  
-  final_mat <- mult_mat(matrices_list, window_size=window_size, norm=normed)
-  
-  if (just_original_mat) {
-    print("Returning original matrix")
-    return(final_mat)
-  }
-  
-  if (shuffled) {
-    if (time_shuffled) {
-      print("Time shuffling!")
-      final_mat <- generate_shuffled_matrices(final_mat, time_shuffled=T)
-    } else {
-      
-      print("Cell shuffling!")
-      final_mat <- generate_shuffled_matrices(final_mat, time_shuffled=F)
-    }
-  }
-  
-  reduced <- reduce_dim(t(final_mat), type, ndim, knn1=knn1,knn2=knn2)
-  
-  
-  dir.create(sprintf("%s\\%s", day_path, matrix_subpath))
-  save(reduced, file=sprintf("%s\\%s\\%s.R", day_path, matrix_subpath, reduced_mat_name))
-  print(sprintf("Saving mat! %s", reduced_mat_name))
-  return(reduced)
-}
-
 generate_shuffled_matrices <- function(final_mat, time_shuffled=T) {
   
   if (time_shuffled) {
@@ -1856,33 +1640,1493 @@ tune_knn_parameters_lem <- function(path) {
   paths_all <- unique(unlist(path_pairs))
   
   
-  knn1_range <- seq(0.275,0.525, by=0.05)
-  knn2_range <- seq(0.05, 0.075, by=0.025)
+  knn1_range <- seq(0.225,0.525, by=0.05)
+  knn2_range <- c(0.075, 0.1, 0.125)
   print(knn1_range)
   print(knn2_range)
   
   
   for (knn1 in knn1_range) {
     for (knn2 in knn2_range)
-      for (path_to_tune in paths_all) {
+      for (path_to_tune in paths_to_use) {
         
-        print(sprintf("Generating lem2 reduction knn1(%f) knn2(%f) for path (%s)",
+        print(sprintf("Generating lem reduction knn1(%f) knn2(%f) for path (%s)",
                       knn1,
                       knn2,
                       path_to_tune))
         
         get_reduced_mat_full_day(path_to_tune,
+                                 type = "lem2",
                                  knn1 = knn1,
                                  knn2 = knn2,
                                  override = F)
         
         get_reduced_mat_full_day(path_to_tune,
+                                 type = "lem2",
                                  knn1 = knn1,
                                  knn2 = knn2,
                                  override = F,
-                                 shuffled = T)              
+                                 shuffled = T,
+                                 time_shuffled = F)              
+        
+        get_reduced_mat_full_day(path_to_tune,
+                                 type = "lem2",
+                                 knn1 = knn1,
+                                 knn2 = knn2,
+                                 override = F,
+                                 shuffled = T,
+                                 time_shuffled = T)           
+    }
+  }
+  
+  
+  for (isomap_knn in seq(0.05, 0.55, by=0.05)) {
+    
+    for (path_to_tune in paths_to_use) {
+    get_reduced_mat_full_day(path_to_tune,
+                             type = "isomap",
+                             knn1 = isomap_knn,
+                             knn2 = 0,
+                             override = F)
+    
+    get_reduced_mat_full_day(path_to_tune,
+                             type = "isomap",
+                             knn1 = isomap_knn,
+                             knn2 = 0,
+                             override = F,
+                             shuffled = T,
+                             time_shuffled = F)              
+    
+    get_reduced_mat_full_day(path_to_tune,
+                             type = "isomap",
+                             knn1 = isomap_knn,
+                             knn2 = 0,
+                             override = F,
+                             shuffled = T,
+                             time_shuffled = T)      
     }
   }
 }
 
 
+
+get_ongoing_activity <- function(bhl, window_size=1) {
+  
+  non_reward_trials <- which(bhl[,7] != 3 & bhl[,7] !=1)
+  
+  correct_rej <- which(bhl[non_reward_trials,8] %% 2 == 1)
+  
+  correct_rejection <- non_reward_trials[correct_rej]
+  
+  
+  correct_rejection <- correct_rejection[which(correct_rejection + 2 <= nrow(bhl))]
+  
+  # all trials perceeded by a correct rejection (+1)
+  # Last three seconds of these trails (+2), - 3*30 (90) frames
+  
+  indices <- bhl[(correct_rejection + 2), 1]
+ 
+  ongoing_ind <- unique(unlist(lapply(indices, function(i)  {(i - 90):(i)}))) 
+  
+ if (window_size != 1) {
+   return(unique(unlist(lapply(ongoing_ind, function(i) {get_binned_index(i, window_size = 30)}))))
+ }
+  
+  return(ongoing_ind) 
+}
+
+
+
+calculate_axes <- function(mat, ongoing_ind, state_factor=0.25) {
+  n_frames <- floor(len(ongoing_ind) * state_factor)
+  
+  # first n_frames
+  
+  pv_thirsty <- colMeans(mat[ongoing_ind[1:n_frames],])
+  
+  # last n_frames
+  pv_quenched <- colMeans(mat[ongoing_ind[(len(ongoing_ind) - (n_frames - 1)):(len(ongoing_ind))],])
+  
+  pv_delta <- pv_thirsty - pv_quenched
+  
+  axes_movement <- apply(mat, 1, function(pv) {pv %*% pv_delta})
+  
+  norm_axes_movement <- (axes_movement - (pv_quenched %*% pv_delta)) / 
+                            ((pv_thirsty %*% pv_delta) - (pv_quenched %*% pv_delta))
+  
+  return(norm_axes_movement)
+}
+
+
+get_axes <- function(path_to_use, window_size, state_factor=0.25, original=T, use_mat=F, mat_from_home=NA) {
+  
+  if (!use_mat) { 
+    mat <- t(get_reduced_mat_full_day(path_to_use, window_size = window_size,just_original_mat = original))
+    
+    if(!original) {
+      mat <- t(mat)
+    }
+  } else{
+    mat <- mat_from_home
+  }
+
+  bhv <- behavior_mat_fixed(path_to_use, 57600)
+  ongoing <- get_ongoing_activity(bhv, 30)
+  
+  return(calculate_axes(mat, ongoing, state_factor = state_factor))
+}
+
+
+
+get_all_paths <- function(path) {
+  paths <- list.dirs(path, recursive=F)[grep("IC", list.dirs(path, recursive=F))]
+  path_pairs <- list()
+  
+  # Get all pairs of possible paths
+  for (p in paths) {
+    mice_num <- str_split(p, "IC")[[1]][[2]]
+    runs <- list.dirs(p, recursive = F)
+    days <- sapply(str_split(runs, "day_"), function(l) {return(l[[2]])})
+    
+    pairs_mat <- apply(combn(days,2), 2, 
+                       function(p) {
+                         return(sprintf("%s\\IC%s\\day_%s", path, mice_num, p))
+                       })
+    
+    path_pairs <-
+      append(path_pairs,
+             lapply(seq_len(ncol(pairs_mat)), function(i) pairs_mat[,i]))
+  }
+  
+  
+  # Pairs across mice, and remove pairs from within mice  
+  if (T) {
+    all_days <- c()
+    
+    for (p in paths) {
+      mice_num <- str_split(p, "IC")[[1]][[2]]
+      runs <- list.dirs(p, recursive = F)
+      days <- sapply(str_split(runs, "day_"), function(l) {return(l[[2]])})
+      all_days <- c(all_days, sprintf("%s\\IC%s\\day_%s", path, mice_num, days))
+    }
+    
+  }
+  
+  return(unique(unlist(path_pairs)))
+}
+
+
+pairs_analysis_control <- 
+                  function(paths, 
+                           control_paths,
+                           across_mice=F, 
+                           nclusters=30,
+                           scale_cluster_dist_matrix=T,
+                           compare_shuffle=F,
+                           whole_matrix=T) {
+  
+
+  
+  
+  structure_correlations <- c()
+  
+  for (ins_path in paths) {
+    for (control_path in control_paths) {
+
+    
+    day1_mat <- get_reduced_mat_full_day(ins_path, knn1=0.325, knn2=0.1)
+    day2_mat <- get_reduced_mat_full_day_control(control_path, knn1=0.325, knn2=0.1)
+  
+    km_day1 <- kmeans(apply(day1_mat, 2, scale), nclusters, iter.max=300)
+    km_day2 <- kmeans(apply(day2_mat, 2, scale), nclusters, iter.max=300)
+
+    
+    dist_matrix_day1 <- as.matrix(dist(km_day1$centers))
+    dist_matrix_day2 <- as.matrix(dist(km_day2$centers))
+    
+    # h1 <- heatmap(dist_matrix_day1, plot=F)
+    # h2 <- heatmap(dist_matrix_day2, plot=F)
+    h1 <- hclust(dist(dist_matrix_day1))
+    h2 <- hclust(dist(dist_matrix_day2))
+    
+    central_tendency_cor <- (cor(c(dist_matrix_day1[h1$order, h1$order]), 
+                                   c(dist_matrix_day2[h2$order, h2$order])))
+
+    
+    print(sprintf("Got mean cor(%f)", central_tendency_cor))
+    
+    structure_correlations <- c(structure_correlations, central_tendency_cor)
+    }
+  }
+  
+  structure_correlations_within_ins <- c()
+  
+  for (ins_path in paths) {
+    for (ins_path_2 in paths) {
+      
+      if (ins_path == ins_path_2) {
+        next
+      }
+      
+      day1_mat <- get_reduced_mat_full_day(ins_path, knn1=0.325, knn2=0.1)
+      day2_mat <- get_reduced_mat_full_day(ins_path_2, knn1=0.325, knn2=0.1)
+      
+      km_day1 <- kmeans(apply(day1_mat, 2, scale), nclusters, iter.max=300)
+      km_day2 <- kmeans(apply(day2_mat, 2, scale), nclusters, iter.max=300)
+      
+      
+      dist_matrix_day1 <- as.matrix(dist(km_day1$centers))
+      dist_matrix_day2 <- as.matrix(dist(km_day2$centers))
+      
+      # h1 <- heatmap(dist_matrix_day1, plot=F)
+      # h2 <- heatmap(dist_matrix_day2, plot=F)
+      h1 <- hclust(dist(dist_matrix_day1))
+      h2 <- hclust(dist(dist_matrix_day2))
+      
+      central_tendency_cor <- (cor(c(dist_matrix_day1[h1$order, h1$order]), 
+                                   c(dist_matrix_day2[h2$order, h2$order])))
+      
+      
+      print(sprintf("Got mean cor(%f)", central_tendency_cor))
+      
+      structure_correlations_within_ins <- c(structure_correlations_within_ins, central_tendency_cor)
+    }
+  }
+  
+  boxplot(structure_correlations, structure_correlations_within_ins, col=c(viridis(200)[floor(runif(2, 1, 200))]))
+  
+return(structure_correlations)
+}
+
+
+calculate_structure_corr <- function(path1, path2, knn1, knn2, method="lem2", nclusters=200, verbose=T, shuffle=F, cell_shuffle=F,
+                                     chunk1=0, chunk2=0,  fq1=0, fq2=0, lq1=0, lq2=0, activity_threshold=0.2, control=F, window_size=30, metric_func=cor) {
+  
+  get_mat_func <- get_reduced_mat_full_day
+  
+  if (control) {
+    print("CONTROL!!!")
+    get_mat_func <- get_reduced_mat_full_day_control
+  }
+  
+  if (shuffle) {
+    is_time_shuffle_cond = c(T,T)
+    is_shuffle_cond = c(F,F)
+    shuffle_idx <- sample(1:2, 1)
+    
+    is_shuffle_cond[shuffle_idx] <- T
+    
+    if (cell_shuffle) {
+      is_time_shuffle_cond[shuffle_idx] <- F
+    }
+    
+    day1_mat <- get_mat_func(type = method, path1, knn1=knn1, knn2=knn2, 
+                             shuffled = is_shuffle_cond[1],
+                             time_shuffled = is_time_shuffle_cond[1],
+                             chunk = chunk1,
+                             first_q=fq1,
+                             last_q=lq1,
+                             window_size=window_size,
+                             activity_threshold = activity_threshold)
+    
+    day2_mat <- get_mat_func(type = method, path2, knn1=knn1, knn2=knn2, 
+                             shuffled = is_shuffle_cond[2],
+                             time_shuffled = is_time_shuffle_cond[2],
+                             chunk = chunk2,
+                             first_q=fq2,
+                             last_q=lq2,
+                             window_size=window_size,
+                             activity_threshold = activity_threshold)
+    
+  } else {
+    day1_mat <- get_mat_func(type = method, path1, knn1=knn1, knn2=knn2,
+                             chunk = chunk1,
+                             first_q=fq1,
+                             last_q=lq1,
+                             window_size=window_size,
+                             activity_threshold = activity_threshold)
+    day2_mat <- get_mat_func(type = method, path2, knn1=knn1, knn2=knn2,
+                             chunk = chunk2,
+                             first_q=fq2,
+                             last_q=lq2,
+                             window_size=window_size,
+                             activity_threshold = activity_threshold)
+  }
+  
+  km_day1 <- kmeans(apply(day1_mat, 2, scale), nclusters, iter.max=500)
+  km_day2 <- kmeans(apply(day2_mat, 2, scale), nclusters, iter.max=500)
+  
+  
+  dist_matrix_day1 <- as.matrix(dist(km_day1$centers))
+  dist_matrix_day2 <- as.matrix(dist(km_day2$centers))
+
+  h1 <- heatmap(dist_matrix_day1)
+  h2 <- heatmap(dist_matrix_day2)
+  
+  res_cor <- (metric_func(c(dist_matrix_day1[h1$rowInd, h1$colInd]), 
+                  c(dist_matrix_day2[h2$rowInd, h2$colInd])))  
+  # 
+  # h1_row <- order.dendrogram(as.dendrogram(hclust(dist(dist_matrix_day1, method = 'euclidean'), method = 'ward.D2')))
+  # 
+  # h1_col <- order.dendrogram(as.dendrogram(hclust(dist(dist_matrix_day1, method = 'euclidean'), method = 'ward.D2')))
+  # h2_row <- order.dendrogram(as.dendrogram(hclust(dist(dist_matrix_day2, method = 'euclidean'), method = 'ward.D2')))
+  # h2_col <- order.dendrogram(as.dendrogram(hclust(dist(dist_matrix_day2, method = 'euclidean'), method = 'ward.D2')))
+  # # 
+  # res_cor <- (cor(c(dist_matrix_day1[h1_row, h1_col]), 
+  #                              c(dist_matrix_day2[h2_row, h2_col])))
+  
+  if (verbose) {
+    print(sprintf("Got mean cor(%f)", res_cor))
+  }
+  
+  return(res_cor)
+}
+
+
+get_color_palettes <- function(path, mat_frames=57600, window_size=30,runs, just_mat=F)
+{
+  behav_files <- list.files(sprintf("%s\\behavior\\",path))
+  behavior_mat_list <- lapply(behav_files,
+                              function(tv_mat) {
+                                return(readMat(sprintf("%s\\behavior\\%s",
+                                                       path,
+                                                       tv_mat))$Stim.Master)
+                              })
+  
+  # Good luck reading this lol
+  behavior_indices <- 
+    unlist(lapply(unlist(lapply(str_split(behav_files, ".TrialVar"), 
+                                function(sp) {
+                                  sp[[1]][1]
+                                })),
+                  function(p) {
+                    tmp <- strsplit(p, "")[[1]]; 
+                    return(as.numeric(paste(tmp[(length(tmp) - 1):(length(tmp))], collapse="")))
+                  }))
+  
+  fm <- behavior_mat_list
+  ret_list <- list()
+  
+  
+  for (i in 1:runs) {
+    if (!i %in% behavior_indices) {
+      ret_list <- append(ret_list, list(NA))
+      next
+    }
+    
+    j <- which(i == behavior_indices)
+    
+    fm[[j]][,1] <- fm[[j]][,1] + (i-1) * mat_frames
+    fm[[j]][,6] <- fm[[j]][,6] + (i-1) * mat_frames
+    ret_list <- append(ret_list, list(fm[[j]]))
+  }
+  
+  
+  if (just_mat) {
+    
+    stim_master_mat <- do.call(rbind,ret_list)
+    colnames(stim_master_mat) <- c(1:ncol(stim_master_mat))
+    colnames(stim_master_mat)[c(1,3,6,7,8)] <- c("Frames",
+                                                 "Grating",
+                                                 "Reward",
+                                                 "TrialType",
+                                                 "Response")
+    return(stim_master_mat)
+  }
+  
+  response_ind <- unlist(lapply(ret_list, function(sdf) {
+    if (!all(is.na(sdf))) { return(sdf[,6])}
+  }))
+  
+  response_ind <- response_ind[!is.nan(response_ind)]
+  binned_responses <- get_binned_index(response_ind, window_size)
+  
+  bound <- do.call(rbind, ret_list)
+  binned_by_trial_type <- 
+    lapply(sort(unique(bound[,7])), 
+           function(t) {get_binned_index(bound[which(bound[,7] == t),1],window_size)})
+  
+  names(binned_by_trial_type) <- sort(unique(bound[,7]))
+
+  return(list(binned_response=binned_responses,
+              binned_by_trial_type=binned_by_trial_type))
+
+}
+
+
+get_color_palettes_control <- function(path, just_mat=F, window_size=30) {
+  behavior_mat <- readMat(sprintf("%s\\behavior.mat", path))
+  
+  bound <- c()
+  for(d in 1:dim(behavior_mat$mystruct)[1]) {
+    
+    bound <- cbind(bound,
+                   unlist(behavior_mat$mystruct[[d]]))
+  }
+  colnames(bound) <- c("TrialType", "Frames_Broke", "Frames", "Reward_Broke", "Reward", "Response", "Grating")
+  
+  if(just_mat) {
+    return(bound)
+  }
+  
+  response_ind <- bound[,"Reward"]
+  response_ind <- response_ind[!is.nan(response_ind)]
+  binned_responses <- get_binned_index(response_ind, window_size)
+  
+  binned_by_trial_type <- 
+    lapply(sort(unique(bound[,"TrialType"])), 
+           function(t) {get_binned_index(bound[which(bound[,"TrialType"] == t),"Frames"],window_size)})
+  
+  names(binned_by_trial_type) <- sort(unique(bound[,"TrialType"]))
+  
+  return(list(binned_response=binned_responses,
+              binned_by_trial_type=binned_by_trial_type))
+}
+
+
+
+plot_hunger_structure_and_control <- function(out_path) {
+  
+  out_path = "Y:\\livneh\\itayta\\figures\\hs_v1_ins_por_normed"
+  all <- get_all_paths("Y:\\livneh\\itayta\\data")
+  
+  IC44_days <- c("170518", "170523", "170519", "170524")
+  IC44_paths <- all[grep("IC44", all)]
+  insula_thirst_paths <- IC44_paths[which(rowSums(sapply(IC44_days, function(d) {as.numeric(grepl(d, IC44_paths))})) > 0)]
+  
+  insula_paths <- c("Y:\\livneh\\itayta\\data\\IC19\\day_150911\\",
+                    "Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
+                    "Y:\\livneh\\itayta\\data\\IC13\\day_150406\\",
+                    "Y:\\livneh\\itayta\\data\\IC13\\day_150407\\",
+                    "Y:\\livneh\\itayta\\data\\IC32\\day_161214\\",
+                    "Y:\\livneh\\itayta\\data\\IC42\\day_161117\\")
+
+  
+  v1_paths <- c("Y:\\livneh\\itayta\\v1_controls\\fov1\\day_140524\\",
+                "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140920\\",
+                "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140921\\",
+                "Y:\\livneh\\itayta\\v1_controls\\fov5\\day_150723\\")
+  
+  por_paths <- c("Y:\\livneh\\itayta\\por_controls\\fov1\\day_141023\\",
+                 "Y:\\livneh\\itayta\\por_controls\\fov2\\day_140805\\",
+                 "Y:\\livneh\\itayta\\por_controls\\fov3\\day_150411\\",
+                 "Y:\\livneh\\itayta\\por_controls\\fov4\\day_150112\\")
+  
+  
+  analysis_params<- list(list(v1_paths, T),
+                         list(insula_paths, F),
+                         list(insula_thirst_paths, F),
+                         list(por_paths, T))
+  
+  names(analysis_params) <- c("v1",
+                        "hunger",
+                        "thirst",
+                        "por")
+  
+  for (analysis_type in names(analysis_params)) {
+  
+  analysis_output_path <- sprintf("%s\\%s_results", out_path, analysis_type)
+  dir.create(analysis_output_path)
+  
+  analysis_paths <- analysis_params[[analysis_type]][[1]]
+  is_control <- analysis_params[[analysis_type]][[2]]
+  
+  for (work_path in analysis_paths) {
+    
+    if (is_control) {
+      pattern_to_split = "fov"
+    } else {
+      pattern_to_split = "IC"
+    }
+     
+    if (analysis_type == "thirst") {
+      activity_thresh = 0.2
+    } else {
+      activity_thresh = 0.25
+    }
+    
+    # Good luck lol
+    working_folder <- sprintf("%s\\%s",
+                              analysis_output_path,
+                              str_replace_all(sprintf("%s%s", 
+                                                      pattern_to_split, 
+                                                      str_split(work_path, pattern_to_split)[[1]][[2]]), 
+                                              "\\\\",  
+                                              "_"))
+    
+    dir.create(working_folder)
+    
+    if (is_control) {
+      mt <- get_reduced_mat_full_day_control(work_path, knn1=0.325, knn2=0.1, 
+                                             activity_threshold = activity_thresh, normed=T)
+      color_palettes_list <- get_color_palettes_control(work_path)
+    } else {
+      mt <- get_reduced_mat_full_day(work_path, knn1=0.325, knn2=0.1,
+                                     activity_threshold = activity_thresh, normed=T)
+      color_palettes_list <- 
+        get_color_palettes(work_path,
+                           mat_frames = 57600,
+                           window_size = 30,
+                           runs=nrow(mt) / (57600 / 30))
+    }
+    
+    colnames(mt) <- sprintf("Dimension %d", 1:ncol(mt))
+    base_cp <- viridis(nrow(mt))  
+    png(sprintf("%s\\response.png", working_folder),
+        units="in",
+        width=8,
+        height=8,
+        res=500)
+  
+    resp_cp <- adjustcolor(base_cp, alpha=0.2)
+    resp_cp[color_palettes_list$binned_response] <- "red"
+    pairs(mt, col=resp_cp, pch=19, size=5,
+          main="Reward")
+    dev.off()
+    
+    png(sprintf("%s\\time.png", working_folder),
+        units="in",
+        width=8,
+        height=8,
+        res=500)
+    pairs(mt, col=base_cp, pch=19, size=5,
+          main="Time passage")
+    dev.off()
+    
+    
+    for (cp_idx in names(color_palettes_list$binned_by_trial_type)) {
+      png(sprintf("%s\\trial_%s.png", working_folder, cp_idx),
+          units="in",
+          width=8,
+          height=8,
+          res=500)
+      
+      resp_cp <- adjustcolor(base_cp, alpha=0.2)
+      resp_cp[color_palettes_list$binned_by_trial_type[[cp_idx]]] <- "red"
+      pairs(mt, col=resp_cp, pch=19, size=5,
+            main=sprintf("Trial type %s", cp_idx))
+      dev.off()
+    }
+  }
+  
+  }
+}
+
+
+figure_1 <- function(out_path) {
+  all <- get_all_paths("Y:\\livneh\\itayta\\data")
+  
+  IC44_days <- c("170518", "170523", "170519", "170524")
+  IC44_paths <- all[grep("IC44", all)]
+  IC44_paths <- IC44_paths[which(rowSums(sapply(IC44_days, function(d) {as.numeric(grepl(d, IC44_paths))})) > 0)]
+  
+  IC47_days <- c("171213", "171214", "180102")
+  IC47_paths <- all[grep("IC47", all)]
+  IC47_paths <- IC47_paths[which(rowSums(sapply(IC47_days, function(d) {as.numeric(grepl(d, IC47_paths))})) > 0)]
+  
+  IC52_days <- c("180404", "180405", "180329", "180522")
+  IC52_paths <- all[grep("IC52", all)]
+  IC52_paths <- IC52_paths[which(rowSums(sapply(IC52_days, function(d) {as.numeric(grepl(d, IC52_paths))})) > 0)]
+  
+  
+  IC56_days <- c("180628")
+  IC56_paths <- all[grep("IC56", all)]
+  IC56_paths <- IC56_paths[which(rowSums(sapply(IC56_days, function(d) {as.numeric(grepl(d, IC56_paths))})) > 0)]
+  
+  IC57_days <- c("180621")
+  IC57_paths <- all[grep("IC57", all)]
+  IC57_paths <- IC57_paths[which(rowSums(sapply(IC57_days, function(d) {as.numeric(grepl(d, IC57_paths))})) > 0)]
+  
+  
+  across <- list(IC44_paths, IC47_paths, IC52_paths, IC56_paths, IC57_paths)
+  within <- list(IC44_paths, IC47_paths, IC52_paths)
+  
+  knn1_lem=0.275
+  knn2_lem = 0.075
+  knn1_iso=0.35
+  knn2_iso=0
+  iso = T
+  corr_mat_within <- c()
+  nreps=4
+  
+  cor_isomap_cell_shuffle <- c()
+  cor_isomap_shuffle <- c()
+  cor_isomap_reg <- c()
+  
+  for (path_list in within) {
+    ind_matrices <- combn(len(path_list), 2)
+    
+    for (i in 1:nreps) {
+    for (ind_idx in 1:ncol(ind_matrices)) {
+      idx_1 <- ind_matrices[1, ind_idx]
+      idx_2 <- ind_matrices[2, ind_idx]
+      
+      cor_lem_reg <-  
+        calculate_structure_corr(path_list[idx_1], 
+                                 path_list[idx_2],
+                                 knn1=knn1_lem,
+                                 knn2=knn2_lem,
+                                 nclusters=200)
+      
+      cor_lem_shuffle <-  
+        calculate_structure_corr(path_list[idx_1], 
+                                 path_list[idx_2],
+                                 knn1=knn1_lem,
+                                 knn2=knn2_lem,
+                                 shuffle = T,
+                                 nclusters=200)
+      
+      cor_lem_cell_shuffle <-  
+        calculate_structure_corr(path_list[idx_1], 
+                                 path_list[idx_2],
+                                 knn1=knn1_lem,
+                                 knn2=knn2_lem,
+                                 shuffle = T,
+                                 cell_shuffle = T,
+                                 nclusters=200)
+      if (iso) {
+      cor_isomap_reg <-  
+        calculate_structure_corr(path_list[idx_1], 
+                                 path_list[idx_2],
+                                 knn1=knn1_iso,
+                                 knn2=0,
+                                 method = "isomap",
+                                 nclusters=200) 
+      
+      cor_isomap_shuffle <-  
+        calculate_structure_corr(path_list[idx_1], 
+                                 path_list[idx_2],
+                                 knn1=knn1_iso,
+                                 knn2=0,
+                                 shuffle = T,
+                                 method = "isomap",
+                                 nclusters=200) 
+      
+      cor_isomap_cell_shuffle <-  
+        calculate_structure_corr(path_list[idx_1], 
+                                 path_list[idx_2],
+                                 knn1=knn1_iso,
+                                 knn2=0,
+                                 shuffle = T,
+                                 cell_shuffle = T,
+                                 method = "isomap",
+                                 nclusters=200)
+      }
+      
+      
+      if (iso) {
+        corr_mat_within <- rbind(corr_mat_within,
+                        c(cor_lem_reg, cor_lem_shuffle, cor_lem_cell_shuffle, 
+                          cor_isomap_reg, cor_isomap_shuffle, cor_isomap_cell_shuffle))
+      } else {
+        corr_mat_within <- rbind(corr_mat_within, c(cor_lem_reg, cor_lem_shuffle, cor_lem_cell_shuffle))
+      }
+    }
+    }
+  }
+  
+  save(corr_mat_within, file="within_cor_mat.R")
+  
+  nreps = 3
+  across_ind_mat <- combn(1:len(across), 2)
+  corr_mat_across <- c()
+  for (ind_col in 1:ncol(across_ind_mat)) {
+    ind_1 <- across_ind_mat[1, ind_col]
+    ind_2 <- across_ind_mat[2, ind_col]
+    
+    
+    for (i in 1:nreps) {
+      for (p1 in across[[ind_1]]) {
+        for(p2 in across[[ind_2]]) {
+        
+        cor_lem_reg <-  
+          calculate_structure_corr(p1, 
+                                   p2,
+                                   knn1=knn1_lem,
+                                   knn2=knn2_lem,
+                                   nclusters=200)
+        
+        cor_lem_shuffle <-  
+          calculate_structure_corr(p1, 
+                                   p2,
+                                   knn1=knn1_lem,
+                                   knn2=knn2_lem,
+                                   shuffle = T,
+                                   nclusters=200)
+        
+        cor_lem_cell_shuffle <-  
+          calculate_structure_corr(p1, 
+                                   p2,
+                                   knn1=knn1_lem,
+                                   knn2=knn2_lem,
+                                   shuffle = T,
+                                   cell_shuffle = T,
+                                   nclusters=200)
+        if (iso) {
+          cor_isomap_reg <-  
+            calculate_structure_corr(p1, 
+                                     p2,
+                                     knn1=knn1_iso,
+                                     knn2=0,
+                                     method = "isomap",
+                                     nclusters=200) 
+          
+          cor_isomap_shuffle <-  
+            calculate_structure_corr(p1, 
+                                     p2,
+                                     knn1=knn1_iso,
+                                     knn2=0,
+                                     shuffle = T,
+                                     method = "isomap",
+                                     nclusters=200) 
+          
+          cor_isomap_cell_shuffle <-  
+            calculate_structure_corr(p1, 
+                                     p2,
+                                     knn1=knn1_iso,
+                                     knn2=0,
+                                     shuffle = T,
+                                     cell_shuffle = T,
+                                     method = "isomap",
+                                     nclusters=200)
+        }
+        
+        
+        if (iso) {
+          corr_mat_across <- rbind(corr_mat_across,
+                                   c(cor_lem_reg, cor_lem_shuffle, cor_lem_cell_shuffle, 
+                                     cor_isomap_reg, cor_isomap_shuffle, cor_isomap_cell_shuffle))
+        } else {
+          corr_mat_across <- rbind(corr_mat_across, c(cor_lem_reg, cor_lem_shuffle, cor_lem_cell_shuffle))
+        }
+        
+        }
+      }
+    }
+  }
+  
+  save(corr_mat_across, file="across_cor_mat.R")
+  
+  
+  melted_cma <- melt(corr_mat_across[,1:3])
+  melted_cmw <- melt(corr_mat_across[,1:3])
+  melted_cmtw$group <- "-"
+  melted_cmta$group <- "-"
+  
+  melted_cmtw$group[which(melted_cmtw$Var2 == 1)] <- "Structure"
+  melted_cmtw$group[which(melted_cmtw$Var2 == 2)] <- "Time shuffled"
+  melted_cmtw$group[which(melted_cmtw$Var2 == 3)] <- "Cell shuffled"
+  melted_cmtw$group <- factor(melted_cmtw$group, levels=c("Structure", "Time shuffled", "Cell shuffled"))
+  
+  melted_cmta$group[which(melted_cmta$Var2 == 1)] <- "Structure"
+  melted_cmta$group[which(melted_cmta$Var2 == 3)] <- "Cell shuffled"
+  melted_cmta$group[which(melted_cmta$Var2 == 2)] <- "Time shuffled"
+  melted_cmta$group <- factor(melted_cmta$group, levels=c("Structure", "Time shuffled", "Cell shuffled"))
+  
+  
+  gcma <- ggplot(melted_cmta) + 
+          geom_boxplot(aes(x=group, y=value, group=group, fill=group), size=1) +
+          scale_fill_brewer(palette="Accent") +
+          theme_light() +
+          ylab("Distance matrix correlation (pearson R)") +
+          xlab("") +
+          ylim(min(corr_mat_within[,1:3], corr_mat_across[,1:3]) * 1.2, 0.8) +
+          theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+                legend.title=element_blank())
+  
+  gcmw <- ggplot(melted_cmtw) + 
+          geom_boxplot(aes(x=group, y=value, group=group, fill=group), size=1) +
+          scale_fill_brewer(palette="Accent") +
+          theme_light() +
+          ylab("Distance matrix correlation (pearson R)") +
+          xlab("") +
+          ylim(min(corr_mat_within[,1:3], corr_mat_across[,1:3]) * 1.2, 0.8) +
+          theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+                legend.title=element_blank())
+  
+  gstack <- grid.arrange(gcmw, gcma, nrow=2)
+  
+  day1_mat <- get_reduced_mat_full_day(type = "lem2", IC47_paths[[1]], knn1=0.325, knn2=0.1)
+  day1_mat$time <- 1:nrow(day1_mat)
+  day2_mat <- get_reduced_mat_full_day(type = "lem2", IC47_paths[[2]], knn1=0.325, knn2=0.1)
+  day2_mat$time <- 1:nrow(day2_mat)
+  day3_mat <- get_reduced_mat_full_day(type = "lem2", IC47_paths[[3]], knn1=0.325, knn2=0.1)
+  day3_mat$time <- 1:nrow(day3_mat)
+  
+  
+  g1 <- ggplot(day1_mat, aes(x=x, y=y, z=z, color=time), size=1.5) +
+    scale_color_continuous(type = "viridis") +
+    theme_light() +
+    theme(legend.position = "NA") +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    xlab("") + ylab("") +
+    axes_3D() +
+    stat_3D(theta=150, phi=250)
+  
+  g2 <- ggplot(day2_mat, aes(x=x, y=y, z=z, color=time), size=1.5) +
+    scale_color_continuous(type = "viridis") +
+    theme_light() +
+    theme(legend.position = "NA") +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + 
+    xlab("") + ylab("") +
+    axes_3D() +
+    stat_3D(theta=170, phi=250)
+  
+  g3 <- ggplot(day3_mat, aes(x=x, y=y, z=z, color=time), size=1.5) +
+    scale_color_continuous(type = "viridis") +
+    theme_light() +
+    theme(legend.position = "NA") +
+    axes_3D() +
+    stat_3D(theta=50, phi=50)
+  
+  gstack_struct <- grid.arrange(g1, g2, nrow=1)
+  
+  
+  km_day1 <- kmeans(apply(day1_mat, 2, scale), 80, iter.max=500)
+  km_day2 <- kmeans(apply(day2_mat, 2, scale), 80, iter.max=500)
+  km_day3 <- kmeans(apply(day3_mat, 2, scale), 80, iter.max=500)
+  
+  
+  dist_matrix_day1 <- as.matrix(dist(km_day1$centers))
+  dist_matrix_day2 <- as.matrix(dist(km_day2$centers))
+  dist_matrix_day3 <- as.matrix(dist(km_day3$centers))
+  color = colorRampPalette(rev(brewer.pal(n = 9,  name = "GnBu")))
+  
+  
+  
+  
+  
+  tiff(sprintf("%s\\figure_1b_h1.tiff", out_path),
+       units="in",
+       height=4,
+       width=4,
+       res=300)
+  h1 <- heatmap(dist_matrix_day1, col=rev(color(50)))
+  dev.off()
+  
+  tiff(sprintf("%s\\figure_1b_h2.tiff", out_path),
+       units="in",
+       height=4,
+       width=4,
+       res=300)
+  h2 <- heatmap(dist_matrix_day2, col=rev(color(50)))
+  dev.off()
+  
+  tiff(sprintf("%s\\figure_1b_h3.tiff", out_path),
+       units="in",
+       height=4,
+       width=4,
+       res=300)
+  h3 <- heatmap(dist_matrix_day3, col=rev(color(50)))
+  dev.off()
+  
+  tiff(sprintf("%s\\figure_1a.tiff", out_path),
+       units="in",
+       height=4,
+       width=8,
+       res=300)
+  plot(gstack_struct)
+  dev.off()
+  
+  
+  tiff(sprintf("%s\\figure_1c.tiff", out_path),
+       units="in",
+       height=9,
+       width=9,
+       res=300)
+  plot(gstack)
+  dev.off()
+  
+}
+
+g3dplot_struct <-  function(mat, phi=250, theta=150) {
+  mat$time <- 1:nrow(mat)
+  g <- ggplot(mat, aes(x=x, y=y, z=z, color=time), size=1.5) +
+    scale_color_continuous(type = "viridis") +
+    theme_light() +
+    theme(legend.position = "NA") +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    xlab("") + ylab("") +
+    axes_3D() +
+    stat_3D(theta=theta, phi=phi)
+  
+  return(g)
+}
+  
+  
+  figure_2 <- function(out_path) {
+    
+    insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC19\\day_150911\\",
+                      "Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
+                      "Y:\\livneh\\itayta\\data\\IC13\\day_150406\\",
+                      "Y:\\livneh\\itayta\\data\\IC13\\day_150407\\",
+                      "Y:\\livneh\\itayta\\data\\IC32\\day_161214\\",
+                      "Y:\\livneh\\itayta\\data\\IC42\\day_161117\\")
+
+    
+    v1_paths <- c("Y:\\livneh\\itayta\\v1_controls\\fov1\\day_140524\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140920\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140921\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov5\\day_150723\\")
+
+    v1_correlations <- c()
+    hunger_correlations <- c()
+    first_last = T
+    nreps=15
+    nclusters=100
+    
+    for (p in insula_hunger_paths) {
+        mt <- get_reduced_mat_full_day(p, knn1=0.325, knn2=0.1)
+        chunks <- nrow(mt) / 1920
+        combination_mat <- combn(1:chunks, 2)
+        
+        for (idx in 1:ncol(combination_mat)) {
+        mcor_avg <- c()
+          if (p == "Y:\\livneh\\itayta\\data\\IC13\\day_150406\\" && (combination_mat[,idx][1] == 2 || combination_mat[,idx][2] == 2)) {
+              next
+          }
+            
+          for (i in 1:nreps) {
+            mcor <- calculate_structure_corr(p, p, knn1=0.325, knn2=0.1,  
+                                             chunk1 = combination_mat[,idx][1], 
+                                             chunk2 = combination_mat[,idx][2], 
+                                             activity_threshold = 0.25, 
+                                             nclusters=nclusters,
+                                             metric_func = cos_dist)
+            
+            mcor_avg <- c(mcor, mcor_avg)  
+           }
+            
+       hunger_correlations <- c(hunger_correlations, mean(mcor_avg))
+      }
+    }
+        
+    for (p in v1_paths) {
+        mt <- get_reduced_mat_full_day_control(p, knn1=0.325, knn2=0.1)
+        chunks <- nrow(mt) / 1920
+        combination_mat <- combn(1:chunks, 2)
+        
+        for (idx in 1:ncol(combination_mat)) {
+        mcor_avg <- c()
+        
+          for (i in 1:nreps) {
+              mcor <- calculate_structure_corr(p, p, knn1=0.325, knn2=0.1,  
+                                               chunk1 = combination_mat[,idx][1], 
+                                               chunk2 = combination_mat[,idx][2], 
+                                               activity_threshold = 0.25, 
+                                               nclusters=nclusters,
+                                               metric_func = cos_dist,
+                                               control = T)
+              mcor_avg <- c(mcor, mcor_avg)
+          }
+            
+          v1_correlations <- c(v1_correlations, mean(mcor_avg))
+        }
+    }
+    
+    v1_all_cor <- v1_correlations
+    h1_all_cor <- hunger_correlations
+    all_df <- data.frame(cor=c(v1_all_cor, h1_all_cor), group=c(rep("V1", times=len(v1_all_cor)), rep("Insula", times=len(h1_all_cor))))
+
+    
+    gall <- ggplot(all_df) + 
+      geom_density(aes(x=cor, group=group, color=group), bw=0.008, size=2) +
+      scale_color_manual(breaks=c("V1", "Insula"), values=c("royalblue4", "violetred3")) +
+      theme_light() +
+      xlim(0.8,1) + 
+      xlab("Distance matrix similarity (cosine)") +
+      ylab("Density") +
+      theme(panel.grid.major = element_blank(), 
+            panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+    
+    
+    tiff(sprintf("%s\\%s", out_path, "figure_2e_cosine.tiff"),
+         units="in",
+         height=4,
+         width=6,
+         res=300)
+    plot(gall)
+    dev.off()
+    
+}
+  
+  
+  
+  figure_2_2 <- function(out_path) {
+    #out_path = "Y:\\livneh\\itayta\\figures\\hs_v1_ins_por"
+    #out_path = "Y:\\livneh\\itayta\\figures\\hs_v1_ins_por"
+    # insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
+    #                          "Y:\\livneh\\itayta\\data\\IC13\\day_150407\\",
+    #                          "Y:\\livneh\\itayta\\data\\IC32\\day_161214\\",
+    #                          "Y:\\livneh\\itayta\\data\\IC42\\day_161117\\")
+    
+    insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC19\\day_150911\\",
+                             "Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
+                             "Y:\\livneh\\itayta\\data\\IC13\\day_150406\\",
+                             "Y:\\livneh\\itayta\\data\\IC13\\day_150407\\",
+                             "Y:\\livneh\\itayta\\data\\IC32\\day_161214\\",
+                             "Y:\\livneh\\itayta\\data\\IC42\\day_161117\\")
+    
+    all <- get_all_paths("Y:\\livneh\\itayta\\data")
+    
+    IC44_days <- c("170518", "170523", "170519", "170524")
+    IC44_paths <- all[grep("IC44", all)]
+    insula_thirst_paths <- IC44_paths[which(rowSums(sapply(IC44_days, function(d) {as.numeric(grepl(d, IC44_paths))})) > 0)]
+    
+    v1_paths <- c("Y:\\livneh\\itayta\\v1_controls\\fov1\\day_140524\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140920\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140921\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov5\\day_150723\\")
+
+    hunger_correlations <- c()
+    thirsty_correlations <- c()
+    v1_correlations <- c()
+    por_correlations <- c()
+    first_last = T
+    nreps=15
+    nclusters=100
+    ext="cosine_"
+    metric=cos_dist
+    xlim <- c(0.8,1)
+    bw=0.008
+    
+    within_mice <- T
+    
+    all_paths <- list(insula_thirst_paths, v1_paths, insula_hunger_paths)
+    names(all_paths) <- c("thirst", "v1", "hunger")
+    
+    nreps = 15
+    act_thresh <- 0.2
+    final_dfs <- list()
+    
+    for (analysis_type in names(all_paths)) {
+      if(analysis_type != "thirst") {
+        act_thresh = 0.25
+      } else {
+        act_thresh = 0.2
+      }
+      result_df <- c()
+      
+      
+      ind_matrix <- combn(1:len(all_paths[[analysis_type]]), 2)
+      
+      if (within_mice) {
+        ind_matrix <- cbind(ind_matrix,
+                            matrix(rep(c(1:len(all_paths[[analysis_type]])), each=2), ncol=len(all_paths[[analysis_type]])))
+      }
+      
+      for(ind_idx in 1:ncol(ind_matrix)) {
+        
+        rep_df <- c()
+        
+        path_1 <- all_paths[[analysis_type]][ind_matrix[1,ind_idx]]
+        path_2 <- all_paths[[analysis_type]][ind_matrix[2,ind_idx]]
+        
+        mt1 <- get_reduced_mat_full_day(path_1, knn1=0.325, knn2=0.1)
+        mt2 <- get_reduced_mat_full_day(path_2, knn1=0.325, knn2=0.1)
+        
+        l1 <- nrow(mt1) / (57600 / 30)
+        l2 <- nrow(mt2) / (57600 / 30)
+        
+        for (i in 1:nreps) {
+          
+          if (path_1 == path_2) {
+            f_l <- 
+              calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                       chunk1 = l1, 
+                                       chunk2 = 1, 
+                                       activity_threshold = act_thresh, 
+                                       nclusters=nclusters,
+                                       metric_func = metric,
+                                       control=ifelse(analysis_type=="v1", T, F))
+            rep_df <- rbind(rep_df,
+                            c(-1, -1, -1, f_l))
+            next
+          }
+
+        
+        f_f <- 
+        calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                 chunk1 = 1, 
+                                 chunk2 = 1, 
+                                 activity_threshold = act_thresh, 
+                                 nclusters=nclusters,
+                                 metric_func = metric,
+                                 control=ifelse(analysis_type=="v1", T, F))
+        
+        
+        l_l <- 
+          calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                   chunk1 = l1, 
+                                   chunk2 = l2, 
+                                   activity_threshold = act_thresh, 
+                                   nclusters=nclusters,
+                                   metric_func = metric,
+                                   control=ifelse(analysis_type=="v1", T, F))
+        
+        l_f <- 
+          calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                   chunk1 = 1, 
+                                   chunk2 = l2, 
+                                   activity_threshold = act_thresh, 
+                                   nclusters=nclusters,
+                                   metric_func = metric,
+                                   control=ifelse(analysis_type=="v1", T, F))
+        f_l <- 
+          calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                   chunk1 = l1, 
+                                   chunk2 = 1, 
+                                   activity_threshold = act_thresh, 
+                                   nclusters=nclusters,
+                                   metric_func = metric,
+                                   control=ifelse(analysis_type=="v1", T, F))
+        
+        rep_df <- rbind(rep_df,
+                        c(f_f, l_l, l_f, f_l))
+
+        }
+        
+        result_df <- rbind(result_df,
+                           colMeans(rep_df))
+      }
+      
+      
+      final_dfs <- append(final_dfs, list(result_df))
+    }
+    fixed_final <- 
+    lapply(final_dfs, 
+           function(sub_df) {
+             within_f_f <-  sub_df[,1][which(sub_df[,1] != -1)]
+             within_l_l <-  sub_df[,2][which(sub_df[,2] != -1)]
+             across_f_l <- sub_df[,3][which(sub_df[,3] != -1)]
+             across_l_f <- sub_df[,4]
+             return(list(f_f=within_f_f, l_l=within_l_l, across=c(across_f_l, across_l_f)))
+           })
+    
+    plot_dfs <- 
+      lapply(final_dfs, 
+             function(sub_df) {
+               within_f_f <-  sub_df[,1][which(sub_df[,1] != -1)]
+               within_l_l <-  sub_df[,2][which(sub_df[,2] != -1)]
+               across_f_l <- sub_df[,3][which(sub_df[,3] != -1)]
+               across_l_f <- sub_df[,4]
+               return(data.frame(cor_values=c(within_f_f, within_l_l, c(across_f_l, across_l_f)),
+                                 type=c(rep("Hungry-Hungry", times=len(within_f_f)), 
+                                        rep("Sated-Sated", times=len(within_l_l)), 
+                                        rep("Across states", times=len(c(across_f_l, across_l_f))))))
+                      
+             })
+    plot_dfs[[1]]$type[plot_dfs[[1]]$type == "Hungry-Hungry"] <- "Thirsty-Thirsty"
+    plot_dfs[[1]]$type[plot_dfs[[1]]$type == "Sated-Sated"] <- "Quenched-Quenched"
+    plot_dfs[[1]]$type <- factor(plot_dfs[[1]]$type, levels=c("Across states", "Thirsty-Thirsty", "Quenched-Quenched"))
+    plot_dfs[[2]]$type <- factor(plot_dfs[[2]]$type, levels=c("Across states", "Hungry-Hungry", "Sated-Sated")) 
+    plot_dfs[[3]]$type <- factor(plot_dfs[[3]]$type, levels=c("Across states", "Hungry-Hungry", "Sated-Sated")) 
+    gv1 <- 
+    ggplot(plot_dfs[[2]]) + 
+      geom_density(aes(x=cor_values, group=type, color=type), size=2, alpha=0.5, bw=bw, linetype="solid") +
+      scale_color_brewer(palette="Set1") +
+      xlim(xlim[1],xlim[2]) +
+      xlab("Distance matrix correlation (r)") +
+      ylab("Density") +
+      theme_light() + 
+      theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+    
+    
+    gthirst <- 
+      ggplot(plot_dfs[[1]]) + 
+      geom_density(aes(x=cor_values, group=type, color=type), size=2, alpha=0.5, bw=bw, linetype="solid") +
+      scale_color_brewer(palette="Set1") +
+      xlim(xlim[1],xlim[2]) +
+      xlab("Distance matrix correlation (r)") +
+      ylab("Density") +
+      theme_light() + 
+      theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+    
+    ghngr <- 
+      ggplot(plot_dfs[[3]]) + 
+      geom_density(aes(x=cor_values, group=type, color=type), size=2, alpha=0.5, bw=bw, linetype="solid") +
+      scale_color_brewer(palette="Set1") +
+      xlim(xlim[1],xlim[2]) +
+      xlab("Distance matrix correlation (r)") +
+      ylab("Density") +
+      theme_light() + 
+      theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+  
+    ghists_stacked <- grid.arrange(gv1, ghngr)
+    tiff(sprintf("%s\\%s%s", out_path, ext, "figure_2cd_v2.tiff"),
+         units="in",
+         height=8,
+         width=8,
+         res=300)
+    plot(ghists_stacked)
+    dev.off()
+    
+    tiff(sprintf("%s\\%s%s", out_path, ext, "figure_2thirsty.tiff"),
+         units="in",
+         height=4,
+         width=8,
+         res=300)
+    plot(gthirst)
+    dev.off()
+    
+    save(plot_dfs, file=sprintf("%s\\%shist_plot_dfs.R", out_path,  ext))
+  }
+  
+  
+  
+  figure_2_3 <- function(out_path) {
+    #out_path = "Y:\\livneh\\itayta\\figures\\hs_v1_ins_por"
+    #out_path = "Y:\\livneh\\itayta\\figures\\hs_v1_ins_por"
+    # insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
+    #                          "Y:\\livneh\\itayta\\data\\IC13\\day_150407\\",
+    #                          "Y:\\livneh\\itayta\\data\\IC32\\day_161214\\",
+    #                          "Y:\\livneh\\itayta\\data\\IC42\\day_161117\\")
+    
+    insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC19\\day_150911\\",
+                             "Y:\\livneh\\itayta\\data\\IC17\\day_150615\\",
+                             "Y:\\livneh\\itayta\\data\\IC13\\day_150406\\",
+                             "Y:\\livneh\\itayta\\data\\IC13\\day_150407\\",
+                             "Y:\\livneh\\itayta\\data\\IC32\\day_161214\\",
+                             "Y:\\livneh\\itayta\\data\\IC42\\day_161117\\")
+    
+    all <- get_all_paths("Y:\\livneh\\itayta\\data")
+    
+    IC44_days <- c("170518", "170523", "170519", "170524")
+    IC44_paths <- all[grep("IC44", all)]
+    insula_thirst_paths <- IC44_paths[which(rowSums(sapply(IC44_days, function(d) {as.numeric(grepl(d, IC44_paths))})) > 0)]
+    
+    v1_paths <- c("Y:\\livneh\\itayta\\v1_controls\\fov1\\day_140524\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140920\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov3\\day_140921\\",
+                  "Y:\\livneh\\itayta\\v1_controls\\fov5\\day_150723\\")
+    
+    hunger_correlations <- c()
+    thirsty_correlations <- c()
+    v1_correlations <- c()
+    por_correlations <- c()
+    first_last = T
+    nreps=15
+    nclusters=100
+    ext="cosine_"
+    metric=cos_dist
+    xlim <- c(0.8,1)
+    bw=0.008
+    window_size=15
+    
+    within_mice <- T
+    
+    all_paths <- list(insula_thirst_paths, v1_paths, insula_hunger_paths)
+    names(all_paths) <- c("thirst", "v1", "hunger")
+    
+    nreps = 15
+    act_thresh <- 0.2
+    final_dfs <- list()
+    
+    for (analysis_type in names(all_paths)) {
+      if(analysis_type != "thirst") {
+        act_thresh = 0.25
+      } else {
+        act_thresh = 0.2
+      }
+      result_df <- c()
+      
+      
+      ind_matrix <- combn(1:len(all_paths[[analysis_type]]), 2)
+      
+      if (within_mice) {
+        ind_matrix <- cbind(ind_matrix,
+                            matrix(rep(c(1:len(all_paths[[analysis_type]])), each=2), ncol=len(all_paths[[analysis_type]])))
+      }
+      
+      for(ind_idx in 1:ncol(ind_matrix)) {
+        
+        rep_df <- c()
+        
+        path_1 <- all_paths[[analysis_type]][ind_matrix[1,ind_idx]]
+        path_2 <- all_paths[[analysis_type]][ind_matrix[2,ind_idx]]
+        
+        mt1 <- get_reduced_mat_full_day(path_1, knn1=0.325, knn2=0.1)
+        mt2 <- get_reduced_mat_full_day(path_2, knn1=0.325, knn2=0.1)
+        
+        l1 <- nrow(mt1) / (57600 / 30)
+        l2 <- nrow(mt2) / (57600 / 30)
+        
+        for (i in 1:nreps) {
+          
+          if (path_1 == path_2) {
+            f_l <- 
+              calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                       chunk1 = l1, 
+                                       chunk2 = 1,
+                                       fq1=0,
+                                       fq2=0,
+                                       lq1=0,
+                                       lq2=0,
+                                       activity_threshold = act_thresh, 
+                                       nclusters=nclusters,
+                                       metric_func = metric,
+                                       window_size = window_size,
+                                       control=ifelse(analysis_type=="v1", T, F))
+            rep_df <- rbind(rep_df,
+                            c(-1, -1, -1, f_l))
+            next
+          }
+          
+          
+          f_f <- 
+            calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                     chunk1 = 1, 
+                                     chunk2 = 1, 
+                                     activity_threshold = act_thresh, 
+                                     nclusters=nclusters,
+                                     metric_func = metric,
+                                     fq1=0,
+                                     fq2=0,
+                                     lq1=0,
+                                     lq2=0,
+                                     window_size = window_size,
+                                     control=ifelse(analysis_type=="v1", T, F))
+          
+          
+          l_l <- 
+            calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                     chunk1 = l1, 
+                                     chunk2 = l2, 
+                                     fq1=0,
+                                     fq2=0,
+                                     lq1=0,
+                                     lq2=0,                                     
+                                     activity_threshold = act_thresh, 
+                                     nclusters=nclusters,
+                                     metric_func = metric,
+                                     window_size = window_size,
+                                     control=ifelse(analysis_type=="v1", T, F))
+          
+          l_f <- 
+            calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                     chunk1 = 1, 
+                                     chunk2 = l2, 
+                                     fq1=0,
+                                     fq2=0,
+                                     lq1=0,
+                                     lq2=0,
+                                     activity_threshold = act_thresh, 
+                                     nclusters=nclusters,
+                                     metric_func = metric,
+                                     window_size = window_size,
+                                     control=ifelse(analysis_type=="v1", T, F))
+          f_l <- 
+            calculate_structure_corr(path_1, path_2, knn1=0.325, knn2=0.1,  
+                                     chunk1 = l1, 
+                                     chunk2 = 1, 
+                                     fq1=0,
+                                     fq2=0,
+                                     lq1=0,
+                                     lq2=0,                                     
+                                     activity_threshold = act_thresh, 
+                                     nclusters=nclusters,
+                                     metric_func = metric,
+                                     window_size = window_size,
+                                     control=ifelse(analysis_type=="v1", T, F))
+          
+          rep_df <- rbind(rep_df,
+                          c(f_f, l_l, l_f, f_l))
+          
+        }
+        
+        result_df <- rbind(result_df,
+                           colMeans(rep_df))
+      }
+      
+      
+      final_dfs <- append(final_dfs, list(result_df))
+    }
+    fixed_final <- 
+      lapply(final_dfs, 
+             function(sub_df) {
+               within_f_f <-  sub_df[,1][which(sub_df[,1] != -1)]
+               within_l_l <-  sub_df[,2][which(sub_df[,2] != -1)]
+               across_f_l <- sub_df[,3][which(sub_df[,3] != -1)]
+               across_l_f <- sub_df[,4]
+               return(list(f_f=within_f_f, l_l=within_l_l, across=c(across_f_l, across_l_f)))
+             })
+    
+    plot_dfs <- 
+      lapply(final_dfs, 
+             function(sub_df) {
+               within_f_f <-  sub_df[,1][which(sub_df[,1] != -1)]
+               within_l_l <-  sub_df[,2][which(sub_df[,2] != -1)]
+               across_f_l <- sub_df[,3][which(sub_df[,3] != -1)]
+               across_l_f <- sub_df[,4]
+               return(data.frame(cor_values=c(within_f_f, within_l_l, c(across_f_l, across_l_f)),
+                                 type=c(rep("Hungry-Hungry", times=len(within_f_f)), 
+                                        rep("Sated-Sated", times=len(within_l_l)), 
+                                        rep("Across states", times=len(c(across_f_l, across_l_f))))))
+               
+             })
+    plot_dfs[[1]]$type[plot_dfs[[1]]$type == "Hungry-Hungry"] <- "Thirsty-Thirsty"
+    plot_dfs[[1]]$type[plot_dfs[[1]]$type == "Sated-Sated"] <- "Quenched-Quenched"
+    plot_dfs[[1]]$type <- factor(plot_dfs[[1]]$type, levels=c("Across states", "Thirsty-Thirsty", "Quenched-Quenched"))
+    plot_dfs[[2]]$type <- factor(plot_dfs[[2]]$type, levels=c("Across states", "Hungry-Hungry", "Sated-Sated")) 
+    plot_dfs[[3]]$type <- factor(plot_dfs[[3]]$type, levels=c("Across states", "Hungry-Hungry", "Sated-Sated")) 
+    gv1 <- 
+      ggplot(plot_dfs[[2]]) + 
+      geom_density(aes(x=cor_values, group=type, color=type), size=2, alpha=0.5, bw=bw, linetype="solid") +
+      scale_color_brewer(palette="Set1") +
+      xlim(xlim[1],xlim[2]) +
+      xlab("Distance matrix correlation (r)") +
+      ylab("Density") +
+      theme_light() + 
+      theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+    
+    
+    gthirst <- 
+      ggplot(plot_dfs[[1]]) + 
+      geom_density(aes(x=cor_values, group=type, color=type), size=2, alpha=0.5, bw=bw, linetype="solid") +
+      scale_color_brewer(palette="Set1") +
+      xlim(xlim[1],xlim[2]) +
+      xlab("Distance matrix correlation (r)") +
+      ylab("Density") +
+      theme_light() + 
+      theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+    
+    ghngr <- 
+      ggplot(plot_dfs[[3]]) + 
+      geom_density(aes(x=cor_values, group=type, color=type), size=2, alpha=0.5, bw=bw, linetype="solid") +
+      scale_color_brewer(palette="Set1") +
+      xlim(xlim[1],xlim[2]) +
+      xlab("Distance matrix correlation (r)") +
+      ylab("Density") +
+      theme_light() + 
+      theme(panel.grid.major = element_blank(), panel.grid.minor= element_blank(),
+            legend.title=element_blank())
+    
+    ghists_stacked <- grid.arrange(gv1, ghngr)
+    tiff(sprintf("%s\\%s%s", out_path, ext, "figure_2cd_v2.tiff"),
+         units="in",
+         height=8,
+         width=8,
+         res=300)
+    plot(ghists_stacked)
+    dev.off()
+    
+    tiff(sprintf("%s\\%s%s", out_path, ext, "figure_2thirsty.tiff"),
+         units="in",
+         height=4,
+         width=8,
+         res=300)
+    plot(gthirst)
+    dev.off()
+    
+    
+    save(plot_dfs, file=sprintf("%s\\%shist_plot_dfs.R", out_path,  ext))
+  }
+  
+  
+  

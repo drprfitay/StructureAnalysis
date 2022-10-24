@@ -108,7 +108,7 @@ plot_structure <- function(path, window_size = 30) {
       }
 }
 
-get_fixed_color_palette <- function(behav_mat_list, mat_frames, behavior_indices, runs, session_size) {
+get_fixed_color_palette <- function(behav_mat_list, mat_frames, behavior_indices, runs, session_size, window_size=30) {
   
   fm <- behav_mat_list
   ret_list <- list()
@@ -294,12 +294,12 @@ for (p1 in up) {
 }
 }
 
-closest <- apply(sim_mat, 1, function(r) {(which.max(r) - (which.max(r) %% 6)) / 6 + ifelse(which.max(r) %% 6 == 0, 0, 1)})
-params <- apply(sim_mat, 1, function(r) {ifelse(which.max(r) %% 6 == 0, 6, which.max(r) %% 6)})
-params_mat[]
+# closest <- apply(sim_mat, 1, function(r) {(which.max(r) - (which.max(r) %% 6)) / 6 + ifelse(which.max(r) %% 6 == 0, 0, 1)})
+# params <- apply(sim_mat, 1, function(r) {ifelse(which.max(r) %% 6 == 0, 6, which.max(r) %% 6)})
+# params_mat[]
 
 
-show <- function(path_to_tune, knn1,knn2, nclusters=0, just_color=F) {
+show <- function(path_to_tune, knn1,knn2, nclusters=0, just_color=F, window_size=30) {
   
   mat <- get_reduced_mat_full_day(path_to_tune, 
                                   knn1 = 0.2, 
@@ -537,23 +537,23 @@ across_mice_decoder_setup <- function(path1,
   return(decoder_setup)
 }
 
+# 
+# poss_pairs <- combn(1:22, 2)
+# 
+# 
+# all_setups <- list()
+# for (idx in 5:ncol(poss_pairs)){
+#   print(paths_all[poss_pairs[1,idx]])
+#   print(paths_all[poss_pairs[2,idx]])
+#   
+#   all_setups <- append(all_setups,
+#                        list(across_mice_decoder_setup(paths_all[poss_pairs[1,idx]],
+#                                                       paths_all[poss_pairs[2,idx]])))
+# }
+# 
 
-poss_pairs <- combn(1:22, 2)
 
-
-all_setups <- list()
-for (idx in 5:ncol(poss_pairs)){
-  print(paths_all[poss_pairs[1,idx]])
-  print(paths_all[poss_pairs[2,idx]])
-  
-  all_setups <- append(all_setups,
-                       list(across_mice_decoder_setup(paths_all[poss_pairs[1,idx]],
-                                                      paths_all[poss_pairs[2,idx]])))
-}
-
-
-
-plot_colored_clusters <- function(reduced_mat, nclusters=8, clusters_indices=c(1:8)){
+plot_colored_clusters <- function(reduced_mat, nclusters=8, clusters_indices=c(1:8), pairs=F){
   
   hc <- hclust(dist(reduced_mat))
   
@@ -562,7 +562,11 @@ plot_colored_clusters <- function(reduced_mat, nclusters=8, clusters_indices=c(1
   indices_to_use <- which(cutree(hc, nclusters) %in% clusters_indices)
   col_palette[indices_to_use] <- viridis(len(indices_to_use))
   
-  plot3d(reduced_mat, col=col_palette)
+  if (pairs) {
+    pairs(reduced_mat, col=col_palette, size=5, pch=19)  
+  } else {
+    plot3d(reduced_mat, col=col_palette, size=5)
+  }
 }
   
 
