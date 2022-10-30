@@ -1983,9 +1983,27 @@ calculate_structure_corr <- function(path1, path2, knn1, knn2, method="lem2", nc
 }
 
 
-get_color_palettes <- function(path, mat_frames=57600, window_size=30,runs, just_mat=F)
+
+get_stim_mat <- function(path, window_size=30, just_mat=F, verbose=F)
 {
   behav_files <- list.files(sprintf("%s\\behavior\\",path))
+  actual_runs=list.files(path)[(grep("IC.*.R", list.files(path)))]
+  actual_runs <- sort(actual_runs)
+  
+  frames_per_mat <- lapply(actual_runs,
+                           function(r_path)
+                             {
+                              load(sprintf("%s\\%s", path, r_path))
+                             return(ncol(fmat))
+                           })
+  
+
+  runs <- len(actual_runs)
+  
+  # cumulative_frames_per_mat <- cumsum(unlist(frames_per_mat))
+  # cumulative_frames_per_mat <- cumulative_frames_per_mat - cumulative_frames_per_mat[1]
+  cumulative_frames_per_mat <-   cumsum(c(0,unlist(frames_per_mat)))[1:runs]
+  
   behavior_mat_list <- lapply(behav_files,
                               function(tv_mat) {
                                 return(readMat(sprintf("%s\\behavior\\%s",
@@ -2010,15 +2028,24 @@ get_color_palettes <- function(path, mat_frames=57600, window_size=30,runs, just
   
   for (i in 1:runs) {
     if (!i %in% behavior_indices) {
-      ret_list <- append(ret_list, list(NA))
+      ret_list <- append(ret_list, list())
+      
+      if (verbose) {  
+        print(sprintf("Skipping behavior mat %d (spont)",i)) 
+      }
       next
     }
     
     j <- which(i == behavior_indices)
     
-    fm[[j]][,1] <- fm[[j]][,1] + (i-1) * mat_frames
-    fm[[j]][,6] <- fm[[j]][,6] + (i-1) * mat_frames
+    if (verbose) {
+      print(sprintf("Adding %d frames to behavior mat %d", cumulative_frames_per_mat[i], i))
+    }
+    fm[[j]][,1] <- fm[[j]][,1] + cumulative_frames_per_mat[i]
+    fm[[j]][,6] <- fm[[j]][,6] + cumulative_frames_per_mat[i]
+    
     ret_list <- append(ret_list, list(fm[[j]]))
+    
   }
   
   
@@ -2053,6 +2080,7 @@ get_color_palettes <- function(path, mat_frames=57600, window_size=30,runs, just
 
 }
 
+get_color_palettes <- get_stim_mat
 
 get_color_palettes_control <- function(path, just_mat=F, window_size=30) {
   behavior_mat <- readMat(sprintf("%s\\behavior.mat", path))

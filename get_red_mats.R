@@ -472,7 +472,7 @@ get_reduced_mat_full_day <- function(day_path,
   
   if (just_original_mat) {
     print("Returning original matrix")
-    reduced <- final_mat
+    reduced <- t(final_mat)
   } else {
     if (shuffled) {
       if (time_shuffled) {

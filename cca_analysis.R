@@ -16,7 +16,7 @@ insula_hunger_paths <- c("Y:\\livneh\\itayta\\data\\IC19\\day_150911\\",
 all <- get_all_paths("Y:\\livneh\\itayta\\data")
 
 #IC44_days <- c("170518", "170523", "170519", "170524")
-IC44_paths <- all[grepl("IC44", all) | grepl("IC52", all)]
+IC44_paths <- all[grepl("IC44", all) | grepl("IC52", all) | grepl("IC47", all)]
 
 #insula_thirst_paths <- IC44_paths[which(rowSums(sapply(IC44_days, function(d) {as.numeric(grepl(d, IC44_paths))})) > 0)]
 insula_thirst_paths <- IC44_paths
@@ -43,6 +43,8 @@ path_categories <- c(rep("Hunger", times=len(insula_hunger_paths)),
                      rep("V1", times=len(v1_paths)),
                      rep("POR", times=len(por_paths)))
 
+paths_all <- paths_all[-15]
+path_categories <- path_categories[-15]
 categories <- path_categories
 categories[categories %in% c("V1", "POR")] <- "Control"
 
@@ -65,22 +67,20 @@ get_neur_mat_and_stim_mat <- function(path, activity, control, window_size=30, m
                           get_reduced_mat_full_day_control,
                           get_reduced_mat_full_day)
   
-  mat <- t(neur_mat_func(path, 
+  mat <- get_reduced_mat_full_day(path, 
                          normed=F,
                          activity_threshold = activity,
                          window_size=window_size,
-                         just_original_mat = T))
-  
+                         just_original_mat = T,
+                         control = control)
+
   
   if (control) {
     stim_master_mat <- 
       get_color_palettes_control(path, just_mat = T, window_size = window_size)
   } else {
     stim_master_mat <- 
-      get_color_palettes(path,
-                         runs=nrow(mat) / (mat_frames / window_size),
-                         just_mat = T, 
-                         window_size = window_size)             
+      get_stim_mat(path, just_mat = T, window_size = window_size, verbose=T)             
   }
   
   return(list(neur_mat=mat, stim_mat=stim_master_mat))
@@ -370,7 +370,7 @@ analyse_modes <- function(window_size=30, mat_frames=57600) {
   
   
   modes_analysis_list <- 
-  lapply(1:len(paths_all),
+  lapply(c(1:len(paths_all)),
          function(idx) {
            
            work_path <- paths_all[idx]
@@ -384,10 +384,10 @@ analyse_modes <- function(window_size=30, mat_frames=57600) {
                          activity_thres, 
                          categories[idx]))
            
-          res <- get_neur_mat_and_stim_mat(work_path, activity_thres, control)
+           res <- get_neur_mat_and_stim_mat(work_path, activity_thres, control, window_size = 15)
            
 
-           cancor_res=cancor_analysis(res$neur_mat , res$stim_mat, window_size=window_size)
+           cancor_res=cancor_analysis(res$neur_mat , res$stim_mat, window_size=15)
 
           return(list(cancor_res=cancor_res))
          })
@@ -435,7 +435,7 @@ analyse_modes <- function(window_size=30, mat_frames=57600) {
                             xlab("Modes") + 
                             ggtitle(sprintf("Modes comparsion - %s", compare_method_name))
         
-        pdf(sprintf("../Desktop/modes_comp/Modes_%s.pdf", tolower(str_replace(compare_method_name, " ", "_"))),
+        pdf(sprintf("../Desktop/cca_analysis/modes_comp/Modes_%s.pdf", tolower(str_replace(compare_method_name, " ", "_"))),
             height=8,
             width=30)
         
@@ -465,7 +465,7 @@ analyse_modes <- function(window_size=30, mat_frames=57600) {
                 return(final)
              })
       
-      for (i in 1:len(paths_all)) {
+      for (i in c(1:len(paths_all))) {
         path <- paths_all[i]
         cat = path_categories[i]
         
@@ -477,7 +477,7 @@ analyse_modes <- function(window_size=30, mat_frames=57600) {
       
         split_r <- str_split(str_split(path, pattern)[[1]][[2]], "\\\\")
       
-        pdf(sprintf("../Desktop//figures_cca//%s_%s%s_%s.pdf",
+        pdf(sprintf("../Desktop//cca_analysis//figures_cca//%s_%s%s_%s.pdf",
                     cat,
                     pattern,
                     split_r[[1]][1],
